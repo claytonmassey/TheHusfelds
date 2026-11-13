@@ -1,0 +1,64 @@
+// Standard database. Catalog of captures and files.
+// File bytes are imported to Vercel Blob later. The vector database is separate.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MediaKind {
+  IMAGE
+  VIDEO
+  SIDECAR
+  OTHER
+}
+
+enum IngestStatus {
+  CATALOGED
+  UPLOADED
+  FAILED
+}
+
+model Capture {
+  id         String    @id @default(cuid())
+  basename   String    @unique
+  capturedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  assets     Asset[]
+
+  @@index([capturedAt])
+}
+
+model Asset {
+  id             String       @id @default(cuid())
+  captureId      String
+  capture        Capture      @relation(fields: [captureId], references: [id], onDelete: Cascade)
+  sourcePath     String       @unique
+  filename       String
+  extension      String
+  kind           MediaKind
+  mimeType       String
+  byteSize       BigInt
+  sha256         String
+  width          Int?
+  height         Int?
+  durationMs     Int?
+  capturedAt     DateTime?
+  sourceModified DateTime
+  blobUrl        String?
+  blobPathname   String?
+  status         IngestStatus @default(CATALOGED)
+  error          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([sha256])
+  @@index([kind])
+  @@index([status])
+  @@index([capturedAt])
+}

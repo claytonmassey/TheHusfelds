@@ -1,0 +1,38 @@
+// Vector database. Rows are created from Vercel Blob objects.
+// Embeddings are added later, once an embedding model is chosen.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/@prisma/vector-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("VECTOR_DATABASE_URL")
+}
+
+enum VectorStatus {
+  PENDING
+  EMBEDDED
+  FAILED
+}
+
+model VectorDocument {
+  id           String       @id @default(cuid())
+  sourcePath   String       @unique
+  sha256       String
+  filename     String
+  kind         String
+  mimeType     String
+  blobUrl      String
+  blobPathname String
+  capturedAt   DateTime?
+  status       VectorStatus @default(PENDING)
+  error        String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([sha256])
+  @@index([status])
+  @@index([blobPathname])
+}

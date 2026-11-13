@@ -1,0 +1,13 @@
+node_modules
+.next
+.vercel
+.env
+.env*.local
+data
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
+
+# Originals never go to GitHub. The catalog is saved in the standard
+# database. File bytes move to Vercel Blob only after that project exists.
+Source

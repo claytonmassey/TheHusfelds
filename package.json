@@ -1,0 +1,30 @@
+{
+  "name": "the-husfelds",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "npm run prisma:generate && next build",
+    "start": "next start",
+    "prisma:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://localhost:5432/thehusfelds} prisma generate && VECTOR_DATABASE_URL=${VECTOR_DATABASE_URL:-postgresql://localhost:5432/thehusfelds_vectors} prisma generate --schema prisma/vector.prisma",
+    "ingest": "tsx scripts/ingest.ts",
+    "import:blob": "tsx scripts/import-blob.ts",
+    "ingest:vectors": "tsx scripts/ingest-vectors.ts",
+    "test": "tsx --test src/ingest/*.test.ts",
+    "postinstall": "npm run prisma:generate"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.0",
+    "@vercel/blob": "^2.0.0",
+    "next": "^16.0.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "prisma": "^6.19.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}
