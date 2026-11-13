@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { CatalogAsset, CatalogCapture, CatalogFile, MediaKind } from "../lib/catalog";
-import { getPrisma, vectorDatabaseConfigured } from "../lib/prisma";
+import { getPrisma, upstashVectorCredentials, vectorDatabaseConfigured } from "../lib/prisma";
 
 const VECTOR_KINDS = new Set<MediaKind>(["IMAGE", "VIDEO"]);
 const DEFAULT_CATALOG = path.join("data", "catalog.json");
@@ -54,11 +54,11 @@ export function vectorRecord(asset: CatalogAsset, capture: string): VectorRecord
 
 export async function ingestBlobIntoVector(options: { catalogPath?: string; log?: (message: string) => void } = {}) {
   const log = options.log ?? ((message: string) => console.log(message));
-  const url = process.env.UPSTASH_VECTOR_REST_URL;
-  const token = process.env.UPSTASH_VECTOR_REST_TOKEN;
-  if (!vectorDatabaseConfigured() || !url || !token) {
-    throw new Error("Upstash Vector is not configured. Set UPSTASH_VECTOR_REST_URL and UPSTASH_VECTOR_REST_TOKEN.");
+  const credentials = upstashVectorCredentials();
+  if (!vectorDatabaseConfigured() || !credentials) {
+    throw new Error("Upstash Vector is not configured. Set HUSFELDS_VECTOR_UPSTASH_VECTOR_REST_URL and HUSFELDS_VECTOR_UPSTASH_VECTOR_REST_TOKEN.");
   }
+  const { url, token } = credentials;
 
   const captures = await loadCaptures(options.catalogPath ?? DEFAULT_CATALOG);
   const records = captures.flatMap((capture) =>
@@ -96,7 +96,7 @@ export async function ingestBlobIntoVector(options: { catalogPath?: string; log?
   return { written };
 }
 
-async function loadCaptures(catalogPath: string): Promise<CatalogCapture[]> {
+export async function loadCaptures(catalogPath: string): Promise<CatalogCapture[]> {
   const prisma = getPrisma();
   if (prisma) {
     const captures = await prisma.capture.findMany({

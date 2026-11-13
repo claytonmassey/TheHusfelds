@@ -9,6 +9,7 @@
     "ingest": "tsx scripts/ingest.ts",
     "import:blob": "tsx scripts/import-blob.ts",
     "ingest:vectors": "tsx scripts/ingest-vectors.ts",
+    "vectors:status": "tsx scripts/vector-status.ts",
     "test": "tsx --test src/ingest/*.test.ts",
     "postinstall": "npm run prisma:generate"
   },

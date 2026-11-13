@@ -29,6 +29,28 @@ export async function syncCatalogToPrisma(catalog: CatalogFile): Promise<void> {
   }
 }
 
+export async function findAssetBySha(sha256: string) {
+  const prisma = getPrisma();
+  if (!prisma) return null;
+  return prisma.asset.findFirst({ where: { sha256 }, include: { capture: true } });
+}
+
+export async function saveUploadedAsset(asset: CatalogAsset, capture: string): Promise<void> {
+  const prisma = getPrisma();
+  if (!prisma) throw new Error("DATABASE_URL is not set.");
+
+  const saved = await prisma.capture.upsert({
+    where: { basename: capture },
+    create: { basename: capture, capturedAt: toDate(asset.capturedAt) },
+    update: { capturedAt: toDate(asset.capturedAt) },
+  });
+  await prisma.asset.upsert({
+    where: { sourcePath: asset.sourcePath },
+    create: assetWrite(saved.id, asset),
+    update: assetWrite(saved.id, asset),
+  });
+}
+
 function assetWrite(captureId: string, asset: CatalogAsset) {
   return {
     captureId,

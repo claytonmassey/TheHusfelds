@@ -20,6 +20,8 @@ const MIME_TYPES: Record<string, string> = {
   webp: "image/webp",
   tif: "image/tiff",
   tiff: "image/tiff",
+  pdf: "application/pdf",
+  txt: "text/plain",
   mov: "video/quicktime",
   mp4: "video/mp4",
   m4v: "video/x-m4v",

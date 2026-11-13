@@ -10,8 +10,15 @@ export function blobConfigured(): boolean {
   return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 }
 
+export function upstashVectorCredentials(): { url: string; token: string } | null {
+  const url = process.env.HUSFELDS_VECTOR_UPSTASH_VECTOR_REST_URL || process.env.UPSTASH_VECTOR_REST_URL;
+  const token = process.env.HUSFELDS_VECTOR_UPSTASH_VECTOR_REST_TOKEN || process.env.UPSTASH_VECTOR_REST_TOKEN;
+  if (!url || !token) return null;
+  return { url: url.replace(/\/$/, ""), token };
+}
+
 export function vectorDatabaseConfigured(): boolean {
-  return Boolean(process.env.UPSTASH_VECTOR_REST_URL && process.env.UPSTASH_VECTOR_REST_TOKEN);
+  return upstashVectorCredentials() !== null;
 }
 
 export function getPrisma(): PrismaClient | null {
