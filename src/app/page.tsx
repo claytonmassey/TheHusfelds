@@ -41,7 +41,7 @@ export default async function HomePage() {
         <article>
           <span>Vector database</span>
           <strong>{loaded.vectorConfigured ? "Configured" : "Not set"}</strong>
-          <p>npm run ingest:vectors registers those Blob objects for embedding.</p>
+          <p>npm run ingest:vectors embeds each image and video in Upstash.</p>
         </article>
       </section>
 

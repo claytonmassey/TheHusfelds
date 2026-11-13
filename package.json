@@ -5,7 +5,7 @@
     "dev": "next dev",
     "build": "npm run prisma:generate && next build",
     "start": "next start",
-    "prisma:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://localhost:5432/thehusfelds} prisma generate && VECTOR_DATABASE_URL=${VECTOR_DATABASE_URL:-postgresql://localhost:5432/thehusfelds_vectors} prisma generate --schema prisma/vector.prisma",
+    "prisma:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://localhost:5432/thehusfelds} DIRECT_URL=${DIRECT_URL:-postgresql://localhost:5432/thehusfelds} prisma generate",
     "ingest": "tsx scripts/ingest.ts",
     "import:blob": "tsx scripts/import-blob.ts",
     "ingest:vectors": "tsx scripts/ingest-vectors.ts",

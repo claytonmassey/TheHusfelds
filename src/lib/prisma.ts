@@ -11,7 +11,7 @@ export function blobConfigured(): boolean {
 }
 
 export function vectorDatabaseConfigured(): boolean {
-  return Boolean(process.env.VECTOR_DATABASE_URL);
+  return Boolean(process.env.UPSTASH_VECTOR_REST_URL && process.env.UPSTASH_VECTOR_REST_TOKEN);
 }
 
 export function getPrisma(): PrismaClient | null {
