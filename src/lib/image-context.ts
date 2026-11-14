@@ -4,6 +4,7 @@ import path from "node:path";
 import type { CatalogAsset, CatalogFile } from "@/lib/catalog";
 import { getPrisma } from "@/lib/prisma";
 import { publishTranscript } from "@/lib/publish-transcript";
+import { readTranscript } from "@/lib/transcripts";
 
 export type ImageNote = {
   sourcePath: string;
@@ -85,15 +86,7 @@ export async function readPageTranscript(sourcePath: string): Promise<string> {
 }
 
 async function readCheckpointDescription(sourcePath: string): Promise<string> {
-  try {
-    const memory = JSON.parse(await readFile(path.join("data", "understandings.json"), "utf8")) as Record<
-      string,
-      { description?: string }
-    >;
-    return memory[sourcePath]?.description ?? "";
-  } catch {
-    return "";
-  }
+  return readTranscript(sourcePath);
 }
 
 function toCatalogAsset(row: {

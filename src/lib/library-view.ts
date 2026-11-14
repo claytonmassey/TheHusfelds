@@ -1,12 +1,10 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-
 import type { CatalogAsset } from "@/lib/catalog";
 import { loadCatalog } from "@/lib/load-catalog";
 import { readImageNotes } from "@/lib/image-context";
 import { pageParagraphs, pageSummary } from "@/lib/page-text";
 import { currentAccountId } from "@/lib/accounts";
 import { readPhotoMarks } from "@/lib/photo-record";
+import { readTranscripts } from "@/lib/transcripts";
 
 export type GalleryImage = {
   sourcePath: string;
@@ -122,16 +120,4 @@ export function galleryGroup(transcript: string): "photo" | "writing" {
   if (CAPTION.test(text) && text.length < 700 && lines.length <= 12) return "photo";
   if (lines.length <= 8 && text.length <= 320 && !WRITING.test(text)) return "photo";
   return "writing";
-}
-
-async function readTranscripts(): Promise<Record<string, string>> {
-  try {
-    const memory = JSON.parse(await readFile(path.join("data", "understandings.json"), "utf8")) as Record<
-      string,
-      { description?: string }
-    >;
-    return Object.fromEntries(Object.entries(memory).map(([key, value]) => [key, value.description ?? ""]));
-  } catch {
-    return {};
-  }
 }

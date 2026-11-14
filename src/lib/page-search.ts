@@ -1,14 +1,10 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-
 import { assertPagePath } from "@/lib/page-edits";
+import { readTranscripts } from "@/lib/transcripts";
 
 export type PageHit = {
   filename: string;
   excerpt: string;
 };
-
-const FILE = path.join("data", "understandings.json");
 
 export async function searchTranscripts(term: string, exceptPath: string): Promise<PageHit[]> {
   const needle = term.trim().replace(/\s+/g, " ");
@@ -19,17 +15,12 @@ export async function searchTranscripts(term: string, exceptPath: string): Promi
   } catch {
     except = "";
   }
-  let memory: Record<string, { description?: string }> = {};
-  try {
-    memory = JSON.parse(await readFile(FILE, "utf8")) as typeof memory;
-  } catch {
-    return [];
-  }
+  const memory = await readTranscripts();
   const folded = needle.toLowerCase();
   const hits: PageHit[] = [];
-  for (const [key, row] of Object.entries(memory)) {
+  for (const [key, description] of Object.entries(memory)) {
     if (key === except || key.includes("..")) continue;
-    const body = (row.description ?? "").split("Context added by the family:")[0];
+    const body = description.split("Context added by the family:")[0];
     const excerpt = sentenceAt(body, folded);
     if (!excerpt) continue;
     const filename = key.split("/").pop() || key;
