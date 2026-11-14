@@ -9,6 +9,7 @@ import { rememberLocalAsset } from "@/ingest/local-catalog";
 import { rememberTranscript } from "@/ingest/understand";
 import { uploadToBlob } from "@/ingest/blob";
 import type { CatalogAsset } from "@/lib/catalog";
+import { storeImagePreviews } from "@/lib/image-preview";
 
 const ALLOWED = new Set(["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "tif", "tiff", "pdf", "txt"]);
 const MAX_BYTES = 20 * 1024 * 1024;
@@ -91,6 +92,14 @@ export async function ingestUploadedDocument(file: File): Promise<UploadedDocume
       savedLocally = false;
     }
     if (!savedToDatabase && !savedLocally) throw new Error("The photo could not be saved.");
+
+    if (token && asset.kind === "IMAGE") {
+      try {
+        await storeImagePreviews({ absolute, sha256, extension, token });
+      } catch {
+        warning ??= "Added to the library. A smaller copy could not be saved.";
+      }
+    }
 
     let transcript = "";
     try {

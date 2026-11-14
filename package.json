@@ -16,9 +16,11 @@
   "dependencies": {
     "@prisma/client": "^6.19.0",
     "@vercel/blob": "^2.0.0",
+    "heic-convert": "^2.1.0",
     "next": "^16.0.1",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "@types/node": "^22.19.0",
