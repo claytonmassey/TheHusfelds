@@ -10,7 +10,7 @@ export default async function GalleryPage() {
       <header className="page-heading">
         <p className="eyebrow">Photos</p>
         <h1>Gallery</h1>
-        <p className="lede">Open an image to set its type and categories, then click a spot to tag a person or thing.</p>
+        <p className="lede">Add photos here. Open an image to set its type and categories, then click a spot to tag a person or thing.</p>
       </header>
       <Gallery images={images} />
     </main>

@@ -26,8 +26,9 @@ export async function loadCatalog(): Promise<LoadedCatalog> {
     try {
       const fromDatabase = await readDatabaseCatalog();
       if (fromDatabase && fromDatabase.stats.captures > 0) {
+        const local = await readLocalCatalog();
         return {
-          catalog: fromDatabase,
+          catalog: mergeLocalUploads(fromDatabase, local),
           source: "database",
           databaseConfigured: true,
           blobConfigured: blob,
@@ -80,6 +81,18 @@ export async function loadCatalog(): Promise<LoadedCatalog> {
     vectorConfigured: vector,
     notice: null,
   };
+}
+
+function mergeLocalUploads(remote: CatalogFile, local: CatalogFile | null): CatalogFile {
+  if (!local) return remote;
+  const known = new Set(remote.captures.flatMap((capture) => capture.assets.map((asset) => asset.sourcePath)));
+  const extra = local.captures.flatMap((capture) => {
+    const assets = capture.assets.filter((asset) => asset.sourcePath.startsWith("uploads/") && !known.has(asset.sourcePath));
+    return assets.length > 0 ? [{ ...capture, assets }] : [];
+  });
+  if (extra.length === 0) return remote;
+  const captures = [...extra, ...remote.captures];
+  return { ...remote, captures, stats: summarize(captures) };
 }
 
 async function readLocalCatalog(): Promise<CatalogFile | null> {

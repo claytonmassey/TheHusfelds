@@ -9,7 +9,7 @@ type UploadResult = {
   error?: string;
 };
 
-export function UploadDocuments() {
+export function UploadDocuments({ onAdded }: { onAdded?: () => void }) {
   const [files, setFiles] = useState<File[]>([]);
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState("");
@@ -45,6 +45,7 @@ export function UploadDocuments() {
     setPending(false);
     setStatus("");
     setFiles([]);
+    if (next.some((result) => !result.error)) onAdded?.();
   }
 
   return (

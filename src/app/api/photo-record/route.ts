@@ -1,4 +1,5 @@
-import { addPhotoTag, assignPhotoCategories, readPhotoLibrary, removePhotoTag, savePhotoNote, updatePhotoTag } from "@/lib/photo-record";
+import { readPageTranscript } from "@/lib/image-context";
+import { addPhotoTag, assignPhotoCategories, movePhotoTag, readPhotoLibrary, removePhotoTag, rotatePhoto, savePhotoNote, updatePhotoTag } from "@/lib/photo-record";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -10,7 +11,8 @@ export async function GET(request: Request) {
     return Response.json({ error: "Choose a photo." }, { status: 400 });
   }
   const library = await readPhotoLibrary(sourcePath);
-  return Response.json(library);
+  const text = await readPageTranscript(sourcePath);
+  return Response.json({ ...library, text });
 }
 
 export async function POST(request: Request) {
@@ -21,6 +23,7 @@ export async function POST(request: Request) {
     categories?: unknown;
     pinId?: unknown;
     note?: unknown;
+    direction?: unknown;
     x?: unknown;
     y?: unknown;
     kind?: unknown;
@@ -47,12 +50,16 @@ export async function POST(request: Request) {
         await updatePhotoTag(sourcePath, { pinId: body.pinId, kind: body.kind, name: body.name, role: body.role, parents: body.parents }),
       );
     }
+    if (body.action === "move") {
+      return Response.json(await movePhotoTag(sourcePath, typeof body.pinId === "string" ? body.pinId : "", body.x, body.y));
+    }
     if (body.action === "untag") return Response.json(await removePhotoTag(sourcePath, typeof body.pinId === "string" ? body.pinId : ""));
     if (body.action === "note") return Response.json(await savePhotoNote(sourcePath, body.note));
+    if (body.action === "rotate") return Response.json(await rotatePhoto(sourcePath, body.direction));
     return Response.json({ error: "Choose a photo." }, { status: 400 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "That could not be saved.";
-    const status = /Choose a photo|Choose a tag|Type a name|Click a spot|person or a thing|daughter or son|own parent|40 tags/.test(message) ? 400 : 500;
+    const status = /Choose a photo|Choose a tag|Choose left or right|Type a name|Click a spot|person or a thing|daughter or son|own parent|40 tags/.test(message) ? 400 : 500;
     return Response.json({ error: message }, { status });
   }
 }

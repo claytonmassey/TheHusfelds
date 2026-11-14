@@ -5,6 +5,7 @@ import path from "node:path";
 import { findAssetBySha, saveUploadedAsset } from "@/ingest/database";
 import { kindFor, mimeTypeFor } from "@/ingest/files";
 import { sha256File } from "@/ingest/hash";
+import { rememberLocalAsset } from "@/ingest/local-catalog";
 import { rememberTranscript } from "@/ingest/understand";
 import { uploadToBlob } from "@/ingest/blob";
 import type { CatalogAsset } from "@/lib/catalog";
@@ -17,6 +18,7 @@ export type UploadedDocument = {
   sourcePath: string;
   alreadyStored: boolean;
   transcript: string;
+  warning?: string;
 };
 
 export async function ingestUploadedDocument(file: File): Promise<UploadedDocument> {
@@ -28,9 +30,6 @@ export async function ingestUploadedDocument(file: File): Promise<UploadedDocume
   if (file.size > MAX_BYTES) throw new Error("Files need to be 20 MB or smaller.");
 
   const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) throw new Error("BLOB_READ_WRITE_TOKEN is not set.");
-  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set.");
-
   const sourceDir = path.resolve(process.env.SOURCE_DIR ?? "Source");
   const directory = await mkdtemp(path.join(tmpdir(), "husfelds-upload-"));
   try {
@@ -49,46 +48,74 @@ export async function ingestUploadedDocument(file: File): Promise<UploadedDocume
       await copyFile(tempPath, absolute);
     }
 
-    const existing = await findAssetBySha(sha256);
+    const existing = await findAssetBySha(sha256).catch(() => null);
     const capture = existing?.capture.basename ?? `upload-${safeStem(original)}-${sha256.slice(0, 8)}`;
+    const modified = info.mtime.toISOString();
     const asset = catalogAsset({
       filename: original,
       extension,
       sourcePath,
       sha256,
       byteSize: info.size,
-      modified: info.mtime.toISOString(),
+      modified,
       blobUrl: existing?.blobUrl ?? null,
       blobPathname: existing?.blobPathname ?? null,
       status: existing?.status === "UPLOADED" ? "UPLOADED" : "CATALOGED",
     });
 
-    if (!asset.blobPathname) {
+    let warning: string | undefined;
+    if (token && !asset.blobPathname) {
       try {
         const blob = await uploadToBlob(absolute, asset, token);
         asset.blobUrl = blob.url;
         asset.blobPathname = blob.pathname;
         asset.status = "UPLOADED";
         asset.error = null;
-      } catch (error) {
+      } catch {
         asset.status = "FAILED";
-        asset.error = error instanceof Error ? error.message : "Blob upload failed.";
-        await saveUploadedAsset(asset, capture);
-        throw new Error(asset.error);
+        warning = "Saved on this Mac. The photo file could not be copied to storage.";
       }
     }
 
-    await saveUploadedAsset(asset, capture);
-    const transcript = await rememberTranscript(sourceDir, asset, capture);
+    let savedToDatabase = true;
+    try {
+      await saveUploadedAsset(asset, capture);
+    } catch (error) {
+      savedToDatabase = false;
+      warning = quietDatabaseMessage(error);
+    }
+    let savedLocally = true;
+    try {
+      await rememberLocalAsset(asset, capture, sourceDir);
+    } catch {
+      savedLocally = false;
+    }
+    if (!savedToDatabase && !savedLocally) throw new Error("The photo could not be saved.");
+
+    let transcript = "";
+    try {
+      transcript = await rememberTranscript(sourceDir, asset, capture);
+    } catch {
+      warning ??= "Added to the library. The page could not be read yet.";
+    }
     return {
       filename: original,
       sourcePath,
       alreadyStored: Boolean(existing?.blobPathname),
       transcript,
+      warning,
     };
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+}
+
+function quietDatabaseMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (/database|pool|prisma|reach database|timed out|can't reach/i.test(message)) {
+    return "Saved on this Mac. The catalog will update when the database is reachable.";
+  }
+  return "Saved on this Mac. The catalog could not be updated.";
 }
 
 function safeStem(filename: string): string {
@@ -118,7 +145,7 @@ function catalogAsset(input: {
     width: null,
     height: null,
     durationMs: null,
-    capturedAt: null,
+    capturedAt: input.modified,
     sourceModified: input.modified,
     blobUrl: input.blobUrl,
     blobPathname: input.blobPathname,

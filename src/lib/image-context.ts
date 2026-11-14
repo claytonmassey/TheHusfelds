@@ -78,6 +78,12 @@ async function libraryImage(sourcePath: string): Promise<{ asset: CatalogAsset; 
   return { asset: toCatalogAsset(row), capture: row.capture.basename };
 }
 
+export async function readPageTranscript(sourcePath: string): Promise<string> {
+  const full = await readCheckpointDescription(sourcePath);
+  const cut = full.indexOf(CONTEXT_MARKER);
+  return (cut >= 0 ? full.slice(0, cut) : full).trim();
+}
+
 async function readCheckpointDescription(sourcePath: string): Promise<string> {
   try {
     const memory = JSON.parse(await readFile(path.join("data", "understandings.json"), "utf8")) as Record<

@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Fraunces, Outfit } from "next/font/google";
 
+import { AccountMenu } from "@/components/account-menu";
 import { SiteNav } from "@/components/site-nav";
+import { currentAccount } from "@/lib/accounts";
 
 import "./globals.css";
 
@@ -22,16 +24,22 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const account = await currentAccount();
   return (
     <html lang="en">
       <body className={`${display.variable} ${sans.variable}`}>
         <div className="app-frame">
           <header className="topbar">
-            <Link href="/" className="brand">
-              The Husfelds
-            </Link>
-            <SiteNav />
+            <div className="topbar-inner">
+              <Link href="/" className="brand">
+                The Husfelds
+              </Link>
+              <div className="topbar-tools">
+                <SiteNav />
+                <AccountMenu account={account} />
+              </div>
+            </div>
           </header>
           <div className="app-body">{children}</div>
         </div>

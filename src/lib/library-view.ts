@@ -4,6 +4,7 @@ import path from "node:path";
 import type { CatalogAsset } from "@/lib/catalog";
 import { loadCatalog } from "@/lib/load-catalog";
 import { readImageNotes } from "@/lib/image-context";
+import { pageParagraphs, pageSummary } from "@/lib/page-text";
 import { readPhotoMarks } from "@/lib/photo-record";
 
 export type GalleryImage = {
@@ -12,6 +13,9 @@ export type GalleryImage = {
   capture: string;
   capturedAt: string | null;
   note: string;
+  people: string;
+  families: string[];
+  rotation: number;
   group: "photo" | "writing";
   tagged: boolean;
 };
@@ -22,8 +26,10 @@ export type KnowledgeItem = {
   extension: string;
   kind: CatalogAsset["kind"];
   addedAt: string;
-  excerpt: string;
-  note: string;
+  label: string;
+  summary: string;
+  scanned: boolean;
+  thumb: boolean;
 };
 
 export async function loadGallery(): Promise<GalleryImage[]> {
@@ -40,6 +46,9 @@ export async function loadGallery(): Promise<GalleryImage[]> {
         capture: capture.basename,
         capturedAt: asset.capturedAt ?? capture.capturedAt,
         note: marks[asset.sourcePath]?.note || notes[asset.sourcePath]?.note || "",
+        people: marks[asset.sourcePath]?.people ?? "",
+        families: marks[asset.sourcePath]?.families ?? [],
+        rotation: marks[asset.sourcePath]?.rotation ?? 0,
         group: galleryGroup(transcripts[asset.sourcePath] ?? ""),
         tagged: marks[asset.sourcePath]?.tagged || Boolean(notes[asset.sourcePath]?.note),
       })),
@@ -49,22 +58,47 @@ export async function loadGallery(): Promise<GalleryImage[]> {
 
 export async function loadKnowledge(): Promise<KnowledgeItem[]> {
   const loaded = await loadCatalog();
-  const notes = await readImageNotes();
   const transcripts = await readTranscripts();
   const items = (loaded.catalog?.captures ?? []).flatMap((capture) =>
-    capture.assets
-      .filter((asset) => asset.sourcePath.startsWith("uploads/"))
-      .map((asset) => ({
+    capture.assets.filter(isDocument).map((asset) => {
+      const transcript = pageTranscript(transcripts[asset.sourcePath] ?? "");
+      const summary = transcript ? pageSummary(pageParagraphs(transcript)) : "";
+      return {
         sourcePath: asset.sourcePath,
         filename: asset.filename,
         extension: asset.extension,
         kind: asset.kind,
         addedAt: asset.sourceModified,
-        excerpt: excerptFor(transcripts[asset.sourcePath] ?? ""),
-        note: notes[asset.sourcePath]?.note ?? "",
-      })),
+        label: documentLabel(transcript),
+        summary: summary.length > 180 ? `${summary.slice(0, 177).replace(/\s+\S*$/, "")}…` : summary,
+        scanned: Boolean(transcript),
+        thumb: asset.kind === "IMAGE",
+      };
+    }),
   );
-  return items.sort((a, b) => b.addedAt.localeCompare(a.addedAt));
+  return items.sort((left, right) => Number(right.scanned) - Number(left.scanned) || left.filename.localeCompare(right.filename));
+}
+
+function isDocument(asset: CatalogAsset): boolean {
+  if (asset.kind === "IMAGE") return true;
+  return asset.extension === "pdf" || asset.extension === "txt";
+}
+
+function pageTranscript(value: string): string {
+  const cut = value.indexOf("\n\nContext added by the family:\n");
+  return (cut >= 0 ? value.slice(0, cut) : value).trim();
+}
+
+export function documentLabel(transcript: string): string {
+  const text = transcript.trim();
+  if (!text) return "Not scanned yet";
+  if (/^no text\b/i.test(text)) return "Photograph";
+  if (/\bobituary\b|\bfind a grave\b|\bpreceded in death\b|\bsurvived by\b/i.test(text)) return "Obituary";
+  if (/\bpost\s?card\b/i.test(text)) return "Postcard";
+  if (/\b(dear|sincerely|yours truly)\b/i.test(text)) return "Letter";
+  if (/\b(baptism|geburt|tauf|trauung|burial|ledger|census)\b/i.test(text)) return "Record";
+  if (galleryGroup(text) === "writing") return "Document";
+  return "Photograph";
 }
 
 const WRITING = /\b(dear|sincerely|post\s?card|correspondence|family group|husband|wife|geburt|baptism|burial|gestorben|patient|ledger|obituary|tauf|trauung)\b/i;
@@ -77,12 +111,6 @@ export function galleryGroup(transcript: string): "photo" | "writing" {
   if (CAPTION.test(text) && text.length < 700 && lines.length <= 12) return "photo";
   if (lines.length <= 8 && text.length <= 320 && !WRITING.test(text)) return "photo";
   return "writing";
-}
-
-function excerptFor(text: string): string {
-  const clean = text.replace(/\s+/g, " ").trim();
-  if (clean.length <= 280) return clean;
-  return `${clean.slice(0, 277)}…`;
 }
 
 async function readTranscripts(): Promise<Record<string, string>> {

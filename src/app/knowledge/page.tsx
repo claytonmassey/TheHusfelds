@@ -8,9 +8,9 @@ export default async function KnowledgePage() {
   return (
     <main className="page-screen">
       <header className="page-heading">
-        <p className="eyebrow">Uploads</p>
+        <p className="eyebrow">Library</p>
         <h1>Knowledge</h1>
-        <p className="lede">Documents added here are transcribed and become part of what the chat can answer.</p>
+        <p className="lede">Every document in the library. A scanned page shows what it is.</p>
       </header>
       <KnowledgeRepo items={items} />
     </main>
