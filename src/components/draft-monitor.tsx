@@ -149,11 +149,11 @@ export function DraftMonitor() {
           </button>
           {draft && draft.people.length > 0 ? (
             confirming && draft.state !== "running" ? (
-              <button type="button" onClick={() => void apply()} disabled={pending === "apply"}>
+              <button type="button" className="is-primary" onClick={() => void apply()} disabled={pending === "apply"}>
                 {pending === "apply" ? "Adding" : "Add them to the family"}
               </button>
             ) : (
-              <button type="button" onClick={() => setConfirming(true)} disabled={draft.state === "running" || pending !== null}>
+              <button type="button" className="is-primary" onClick={() => setConfirming(true)} disabled={draft.state === "running" || pending !== null}>
                 Apply to the family
               </button>
             )

@@ -74,15 +74,12 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
   const placedRef = useRef(placed);
   placedRef.current = placed;
   const homeRef = useRef<{ zoom: number; pan: { x: number; y: number } } | null>(null);
+  const hoverTimerRef = useRef(0);
+  const hoverHomeRef = useRef<{ zoom: number; pan: { x: number; y: number } } | null>(null);
   const selectedIdRef = useRef<string | null>(null);
   const treeFocusRef = useRef<string | null>(null);
-  const creatingRef = useRef(false);
-  const hoverSlideRef = useRef(0);
-  const pointerRef = useRef({ x: 0, y: 0 });
-  const slideRef = useRef<(id: string) => void>(() => {});
   selectedIdRef.current = selectedId;
   treeFocusRef.current = treeFocusId;
-  creatingRef.current = creating;
   const [motionFrame, setMotionFrame] = useState(0);
   nodesRef.current = layout.nodes;
   scaleMotionRef.current = fit * zoom;
@@ -94,7 +91,7 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
   function applyZoom(nextZoom: number, pointerX: number, pointerY: number) {
     const frame = frameRef.current;
     if (!frame) return;
-    const clamped = Math.min(2.6, Math.max(0.7, nextZoom));
+    const clamped = Math.min(8, Math.max(0.7, nextZoom));
     const prevScale = fitRef.current * zoomRef.current;
     const nextScale = fitRef.current * clamped;
     const contentX = (pointerX - panRef.current.x) / prevScale;
@@ -109,11 +106,13 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
   function zoomBy(factor: number) {
     const frame = frameRef.current;
     if (!frame) return;
+    forgetHoverZoom();
     applyZoom(zoomRef.current * factor, frame.clientWidth / 2, frame.clientHeight / 2);
   }
 
   function fitTree() {
     const frame = frameRef.current;
+    forgetHoverZoom();
     zoomRef.current = 1;
     setZoom(1);
     if (!frame) return;
@@ -164,12 +163,24 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
       event.preventDefault();
       flyToken.current += 1;
       cancelAnimationFrame(flyRef.current);
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = 0;
+      hoverHomeRef.current = null;
       if (!selectedIdRef.current) {
         homeRef.current = null;
         settleRef.current();
       }
       const rect = frame.getBoundingClientRect();
-      applyZoom(zoomRef.current * (event.deltaY < 0 ? 1.1 : 1 / 1.1), event.clientX - rect.left, event.clientY - rect.top);
+      const pointerX = event.clientX - rect.left;
+      const pointerY = event.clientY - rect.top;
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? frame.clientHeight : 1;
+      if (event.ctrlKey) {
+        applyZoom(zoomRef.current * Math.exp(-event.deltaY * unit * 0.01), pointerX, pointerY);
+        return;
+      }
+      const next = { x: panRef.current.x - event.deltaX * unit, y: panRef.current.y - event.deltaY * unit };
+      panRef.current = next;
+      setPan(next);
     };
     frame.addEventListener("wheel", onWheel, { passive: false });
     return () => frame.removeEventListener("wheel", onWheel);
@@ -193,7 +204,7 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
     const ids = new Set([...Object.keys(start), ...Object.keys(target)]);
     const begun = performance.now();
     const step = (now: number) => {
-      const t = Math.min(1, (now - begun) / 820);
+      const t = Math.min(1, (now - begun) / 1700);
       const ease = 1 - (1 - t) ** 3;
       const next: Record<string, { x: number; y: number }> = {};
       for (const id of ids) {
@@ -236,7 +247,7 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
     const start = performance.now();
     const step = (now: number) => {
       if (flyToken.current !== token) return;
-      const t = Math.min(1, (now - start) / 820);
+      const t = Math.min(1, (now - start) / 1700);
       const ease = 1 - (1 - t) ** 3;
       const nextZoom = startZoom + (targetZoom - startZoom) * ease;
       const nextPan = {
@@ -297,24 +308,56 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
     return { zoom: nextZoom, pan: { x: panX, y: panY } };
   }
 
-  function clearFamilySlide() {
-    window.clearTimeout(hoverSlideRef.current);
-    hoverSlideRef.current = 0;
+  function forgetHoverZoom() {
+    window.clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = 0;
+    hoverHomeRef.current = null;
+    cancelFly();
   }
 
-  function queueFamilySlide(id: string, x: number, y: number) {
-    const moved = Math.hypot(x - pointerRef.current.x, y - pointerRef.current.y);
-    pointerRef.current = { x, y };
-    if (treeFocusRef.current && moved < 6) return;
-    clearFamilySlide();
-    hoverSlideRef.current = window.setTimeout(() => {
-      hoverSlideRef.current = 0;
-      slideRef.current(id);
+  function zoomToward(id: string) {
+    const frame = frameRef.current;
+    const node = layout.nodes.find((item) => item.id === id);
+    if (!frame || !node || treeFocusRef.current || selectedIdRef.current) return;
+    if (!hoverHomeRef.current) hoverHomeRef.current = { zoom: zoomRef.current, pan: { ...panRef.current } };
+    const hoverScale = 1.16;
+    const cardArea = FAMILY_NODE_SIZE.width * FAMILY_NODE_SIZE.height * hoverScale * hoverScale;
+    const screenArea = Math.max(1, window.innerWidth * window.innerHeight);
+    const nextScale = Math.sqrt((screenArea * 0.05) / cardArea);
+    const nextZoom = nextScale / Math.max(fitRef.current, 0.05);
+    const shift = placedRef.current[id] ?? { x: 0, y: 0 };
+    const panX = frame.clientWidth / 2 - (node.x + shift.x + FAMILY_NODE_SIZE.width / 2) * nextScale;
+    const panY = frame.clientHeight / 2 - (node.y + shift.y + FAMILY_NODE_SIZE.height / 2) * nextScale;
+    flyTo(nextZoom, { x: panX, y: panY });
+  }
+
+  function queueHoverZoom(id: string) {
+    if (treeFocusRef.current || selectedIdRef.current || creating) return;
+    window.clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = window.setTimeout(() => {
+      hoverTimerRef.current = 0;
+      zoomToward(id);
+    }, 1000);
+  }
+
+  function queueHoverReturn() {
+    window.clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = 0;
+    if (!hoverHomeRef.current || treeFocusRef.current) return;
+    hoverTimerRef.current = window.setTimeout(() => {
+      hoverTimerRef.current = 0;
+      const home = hoverHomeRef.current;
+      if (!home || treeFocusRef.current) return;
+      flyTo(home.zoom, home.pan, () => {
+        if (hoverHomeRef.current === home) hoverHomeRef.current = null;
+      });
     }, 1000);
   }
 
   function showTree(id: string, done?: () => void) {
-    clearFamilySlide();
+    window.clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = 0;
+    hoverHomeRef.current = null;
     treeFocusRef.current = id;
     if (!homeRef.current) homeRef.current = { zoom: zoomRef.current, pan: { ...panRef.current } };
     setCreating(false);
@@ -329,12 +372,6 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
     }
     flyTo(view.zoom, view.pan, done);
   }
-
-  slideRef.current = (id: string) => {
-    if (selectedIdRef.current || creatingRef.current) return;
-    if (treeFocusRef.current === id) return;
-    showTree(id);
-  };
 
   function focusPerson(id: string) {
     setSelectedId(null);
@@ -362,7 +399,7 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
     return () => {
       cancelAnimationFrame(motion.raf);
       cancelAnimationFrame(flyRef.current);
-      window.clearTimeout(hoverSlideRef.current);
+      window.clearTimeout(hoverTimerRef.current);
     };
   }, []);
 
@@ -487,6 +524,7 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
       if (!moved) {
         moved = true;
         setPanning(true);
+        forgetHoverZoom();
         if (focusedTree) cancelFly();
       }
       const frame = frameRef.current;
@@ -554,6 +592,29 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
     );
   }
 
+  const hoveredName = hoveredId ? (layout.nodes.find((node) => node.id === hoveredId)?.name ?? "") : "";
+  const [namePlate, setNamePlate] = useState("");
+  const [nameShown, setNameShown] = useState(false);
+  const nameShownRef = useRef(false);
+
+  useEffect(() => {
+    if (!hoveredName) {
+      nameShownRef.current = false;
+      setNameShown(false);
+      return;
+    }
+    setNamePlate(hoveredName);
+    if (nameShownRef.current) return;
+    let frame = 0;
+    frame = requestAnimationFrame(() => {
+      nameShownRef.current = true;
+      setNameShown(true);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [hoveredName]);
+
+  const depth = depthOffsets(layout.nodes, hoveredId, treeFocusId, focused);
+
   return (
     <div className="family-layout">
       <div className="family-actions">
@@ -572,6 +633,11 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
         </button>
       </div>
       <div className="tree-stage">
+        {namePlate ? (
+          <p className={nameShown ? "tree-nameplate is-shown" : "tree-nameplate"} style={treeFocusId ? { top: "3.6rem" } : undefined} aria-hidden="true">
+            {namePlate}
+          </p>
+        ) : null}
         <div className="tree-zoom" role="group" aria-label="Zoom">
           <button type="button" aria-label="Zoom out" onClick={() => zoomBy(1 / 1.2)}>
             −
@@ -603,11 +669,18 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
               const to = pullOf(edge.toId);
               const fromShift = placed[edge.fromId] ?? { x: 0, y: 0 };
               const toShift = placed[edge.toId] ?? { x: 0, y: 0 };
+              const fromDepth = depth.get(edge.fromId) ?? { x: 0, y: 0, scale: 1 };
+              const toDepth = depth.get(edge.toId) ?? { x: 0, y: 0, scale: 1 };
               const outside = focused ? !focused.has(edge.fromId) || !focused.has(edge.toId) : false;
               return (
                 <path
                   key={`${edge.fromId}-${edge.toId}`}
-                  d={smoothLink(edge.x1 + from.x + fromShift.x, edge.y1 + from.y + fromShift.y, edge.x2 + to.x + toShift.x, edge.y2 + to.y + toShift.y)}
+                  d={smoothLink(
+                    edge.x1 + from.x + fromShift.x + fromDepth.x,
+                    edge.y1 + from.y + fromShift.y + fromDepth.y,
+                    edge.x2 + to.x + toShift.x + toDepth.x,
+                    edge.y2 + to.y + toShift.y + toDepth.y,
+                  )}
                   className={outside ? (treeFocusId ? "is-aside" : "is-dimmed") : undefined}
                 />
               );
@@ -646,6 +719,7 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
             ]
               .filter(Boolean)
               .join(" ");
+            const depthShift = depth.get(node.id) ?? { x: 0, y: 0, scale: 1 };
             const avatar = record?.avatar;
             const avatarTurn = avatar ? (photos.find((photo) => photo.sourcePath === avatar.sourcePath)?.rotation ?? 0) : 0;
             const reach = controlReach(slots, node.x, node.y);
@@ -660,15 +734,16 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
                   height: FAMILY_NODE_SIZE.height,
                   transform: `translate(${pull.x + shift.x}px, ${pull.y + shift.y}px)`,
                 }}
-                onMouseEnter={(event) => {
+                onMouseEnter={() => {
                   setHoveredId(node.id);
-                  queueFamilySlide(node.id, event.clientX, event.clientY);
+                  queueHoverZoom(node.id);
                 }}
                 onMouseLeave={() => {
                   setHoveredId((current) => (current === node.id ? null : current));
-                  clearFamilySlide();
+                  queueHoverReturn();
                 }}
               >
+                <div className="tree-depth" style={{ transform: `translate(${depthShift.x}px, ${depthShift.y}px) scale(${depthShift.scale})` }}>
                 <span
                   className="tree-hover"
                   style={{ top: -reach.above, right: -10, bottom: -reach.below, left: -10 }}
@@ -716,6 +791,7 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
                     {slot.label}
                   </button>
                 ))}
+                </div>
               </div>
             );
           })}
@@ -735,6 +811,87 @@ function smoothLink(x1: number, y1: number, x2: number, y2: number): string {
 
 function clampMotion(value: number, limit: number): number {
   return Math.max(-limit, Math.min(limit, value));
+}
+
+function depthOffsets(
+  nodes: Array<{ id: string; x: number; y: number }>,
+  hoveredId: string | null,
+  treeFocusId: string | null,
+  members: Set<string> | null,
+): Map<string, { x: number; y: number; scale: number }> {
+  const offsets = new Map<string, { x: number; y: number; scale: number }>();
+  if (!hoveredId || treeFocusId) return offsets;
+  const home = nodes.find((node) => node.id === hoveredId);
+  if (!home) return offsets;
+  const width = FAMILY_NODE_SIZE.width;
+  const height = FAMILY_NODE_SIZE.height;
+  const originX = home.x + width / 2;
+  const originY = home.y + height / 2;
+  const placed = nodes.map((node) => {
+    if (node.id === hoveredId) return { ...node, dx: 0, dy: 0, scale: 1.16, near: true };
+    const dx = node.x + width / 2 - originX;
+    const dy = node.y + height / 2 - originY;
+    const distance = Math.hypot(dx, dy) || 1;
+    const near = members?.has(node.id) ?? false;
+    const step = near ? 0 : 46;
+    return { ...node, dx: (dx / distance) * step, dy: (dy / distance) * step, scale: near ? 1.1 : 0.74, near };
+  });
+  separateCards(placed, hoveredId, width, height);
+  for (const node of placed) offsets.set(node.id, { x: node.dx, y: node.dy, scale: node.scale });
+  return offsets;
+}
+
+function separateCards(
+  nodes: Array<{ id: string; x: number; y: number; dx: number; dy: number; scale: number; near: boolean }>,
+  hoveredId: string,
+  width: number,
+  height: number,
+) {
+  const gap = 16;
+  const bounds = (node: (typeof nodes)[number]) => {
+    const centerX = node.x + width / 2 + node.dx;
+    const centerY = node.y + height / 2 + node.dy;
+    return {
+      left: centerX - (width * node.scale) / 2,
+      top: centerY - (height * node.scale) / 2,
+      right: centerX + (width * node.scale) / 2,
+      bottom: centerY + (height * node.scale) / 2,
+    };
+  };
+  for (let pass = 0; pass < 8; pass += 1) {
+    let moved = false;
+    for (let i = 0; i < nodes.length; i += 1) {
+      for (let j = i + 1; j < nodes.length; j += 1) {
+        const left = nodes[i];
+        const right = nodes[j];
+        if (!left.near && !right.near) continue;
+        const a = bounds(left);
+        const b = bounds(right);
+        const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left) + gap;
+        const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) + gap;
+        if (overlapX <= 0 || overlapY <= 0) continue;
+        const alongX = overlapX <= overlapY;
+        const amount = alongX ? overlapX : overlapY;
+        const aCenter = alongX ? (a.left + a.right) / 2 : (a.top + a.bottom) / 2;
+        const bCenter = alongX ? (b.left + b.right) / 2 : (b.top + b.bottom) / 2;
+        const sign = aCenter <= bCenter ? -1 : 1;
+        const shift = (node: (typeof nodes)[number], delta: number) => {
+          if (alongX) node.dx += delta;
+          else node.dy += delta;
+        };
+        if (left.id === hoveredId) shift(right, -sign * amount);
+        else if (right.id === hoveredId) shift(left, sign * amount);
+        else if (left.near && !right.near) shift(right, -sign * amount);
+        else if (right.near && !left.near) shift(left, sign * amount);
+        else {
+          shift(left, (sign * amount) / 2);
+          shift(right, (-sign * amount) / 2);
+        }
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
 }
 
 function PersonModal({
