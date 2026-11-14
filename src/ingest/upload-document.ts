@@ -9,6 +9,7 @@ import { rememberLocalAsset } from "@/ingest/local-catalog";
 import { rememberTranscript } from "@/ingest/understand";
 import { uploadToBlob } from "@/ingest/blob";
 import type { CatalogAsset } from "@/lib/catalog";
+import { currentAccountId } from "@/lib/accounts";
 import { storeImagePreviews } from "@/lib/image-preview";
 
 const ALLOWED = new Set(["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "tif", "tiff", "pdf", "txt"]);
@@ -46,6 +47,7 @@ export async function ingestUploadedDocument(file: File): Promise<UploadedDocume
     if (!token && !localCopy) throw new Error("The photo could not be saved.");
 
     const existing = await findAssetBySha(sha256).catch(() => null);
+    const accountId = existing ? null : await currentAccountId();
     const capture = existing?.capture.basename ?? `upload-${safeStem(original)}-${sha256.slice(0, 8)}`;
     const modified = info.mtime.toISOString();
     const asset = catalogAsset({
@@ -57,6 +59,7 @@ export async function ingestUploadedDocument(file: File): Promise<UploadedDocume
       modified,
       blobUrl: existing?.blobUrl ?? null,
       blobPathname: existing?.blobPathname ?? null,
+      uploadedBy: existing?.uploadedBy ?? accountId,
       status: existing?.status === "UPLOADED" ? "UPLOADED" : "CATALOGED",
     });
 
@@ -154,6 +157,7 @@ function catalogAsset(input: {
   modified: string;
   blobUrl: string | null;
   blobPathname: string | null;
+  uploadedBy: string | null;
   status: CatalogAsset["status"];
 }): CatalogAsset {
   return {
@@ -171,6 +175,7 @@ function catalogAsset(input: {
     sourceModified: input.modified,
     blobUrl: input.blobUrl,
     blobPathname: input.blobPathname,
+    uploadedBy: input.uploadedBy,
     status: input.status,
     error: null,
   };

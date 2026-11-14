@@ -17,6 +17,7 @@ export type CatalogAsset = {
   sourceModified: string;
   blobUrl: string | null;
   blobPathname: string | null;
+  uploadedBy?: string | null;
   status: IngestStatus;
   error: string | null;
 };

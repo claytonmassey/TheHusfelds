@@ -5,6 +5,7 @@ import type { CatalogAsset } from "@/lib/catalog";
 import { loadCatalog } from "@/lib/load-catalog";
 import { readImageNotes } from "@/lib/image-context";
 import { pageParagraphs, pageSummary } from "@/lib/page-text";
+import { currentAccountId } from "@/lib/accounts";
 import { readPhotoMarks } from "@/lib/photo-record";
 
 export type GalleryImage = {
@@ -18,6 +19,7 @@ export type GalleryImage = {
   rotation: number;
   group: "photo" | "writing";
   tagged: boolean;
+  removable: boolean;
 };
 
 export type KnowledgeItem = {
@@ -30,9 +32,11 @@ export type KnowledgeItem = {
   summary: string;
   scanned: boolean;
   thumb: boolean;
+  removable: boolean;
 };
 
 export async function loadGallery(): Promise<GalleryImage[]> {
+  const accountId = await currentAccountId();
   const loaded = await loadCatalog();
   const notes = await readImageNotes();
   const marks = await readPhotoMarks();
@@ -51,12 +55,14 @@ export async function loadGallery(): Promise<GalleryImage[]> {
         rotation: marks[asset.sourcePath]?.rotation ?? 0,
         group: galleryGroup(transcripts[asset.sourcePath] ?? ""),
         tagged: marks[asset.sourcePath]?.tagged || Boolean(notes[asset.sourcePath]?.note),
+        removable: ownsUpload(accountId, asset.uploadedBy),
       })),
   );
   return images.sort((a, b) => (b.capturedAt ?? "").localeCompare(a.capturedAt ?? "") || a.filename.localeCompare(b.filename));
 }
 
 export async function loadKnowledge(): Promise<KnowledgeItem[]> {
+  const accountId = await currentAccountId();
   const loaded = await loadCatalog();
   const transcripts = await readTranscripts();
   const items = (loaded.catalog?.captures ?? []).flatMap((capture) =>
@@ -73,10 +79,15 @@ export async function loadKnowledge(): Promise<KnowledgeItem[]> {
         summary: summary.length > 180 ? `${summary.slice(0, 177).replace(/\s+\S*$/, "")}…` : summary,
         scanned: Boolean(transcript),
         thumb: asset.kind === "IMAGE",
+        removable: asset.kind === "IMAGE" ? ownsUpload(accountId, asset.uploadedBy) : true,
       };
     }),
   );
   return items.sort((left, right) => Number(right.scanned) - Number(left.scanned) || left.filename.localeCompare(right.filename));
+}
+
+function ownsUpload(accountId: string | null, uploadedBy: string | null | undefined): boolean {
+  return Boolean(accountId && uploadedBy && accountId === uploadedBy);
 }
 
 function isDocument(asset: CatalogAsset): boolean {

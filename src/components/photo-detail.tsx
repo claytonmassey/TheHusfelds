@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent, type ReactNode } from "react";
 
 import { NameSearch } from "@/components/name-search";
 import { mergeKnownNames, type KnownName } from "@/lib/known-name";
@@ -8,6 +8,16 @@ import type { GalleryImage } from "@/lib/library-view";
 import { leadSearchTerm, mapHref, pageLeads, type PageLead } from "@/lib/page-leads";
 import { marksIn, pageParagraphs, pageSummary, peopleInOrder } from "@/lib/page-text";
 import { ITEM_TYPES, joinNames, sameName, turnPoint, turnRotation, type ItemTypeId, type Person, type PhotoPin, type PhotoRecord } from "@/lib/photo-types";
+
+type PhotoGesture = {
+  mode: "tap" | "pan" | "pinch";
+  start: { scale: number; x: number; y: number };
+  originX: number;
+  originY: number;
+  startDist: number;
+  startMidX: number;
+  startMidY: number;
+};
 
 type LibraryPayload = {
   categories: string[];
@@ -22,6 +32,7 @@ export function PhotoDetail({
   image,
   note,
   onClose,
+  onRemoved,
   onSaved,
   onTagged,
   onTurned,
@@ -29,18 +40,26 @@ export function PhotoDetail({
   image: GalleryImage;
   note: string;
   onClose: () => void;
+  onRemoved: () => void;
   onSaved: (note: string) => void;
   onTagged: (update: { labels: string[]; tagged: boolean }) => void;
   onTurned: (rotation: number) => void;
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const viewRef = useRef({ scale: 1, x: 0, y: 0 });
+  const gestureRef = useRef<PhotoGesture | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const [box, setBox] = useState({ left: 0, top: 0, width: 0, height: 0 });
   const [categories, setCategories] = useState<string[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
   const [roster, setRoster] = useState<KnownName[]>([]);
   const [record, setRecord] = useState<PhotoRecord | null>(null);
+  const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
+  const [placing, setPlacing] = useState(false);
+  const placingRef = useRef(false);
+  const [textOpen, setTextOpen] = useState(false);
   const [draft, setDraft] = useState<{ x: number; y: number } | null>(null);
   const [pinsHidden, setPinsHidden] = useState(false);
   const [drag, setDrag] = useState<{ id: string; x: number; y: number; originX: number; originY: number; moved: boolean } | null>(null);
@@ -58,6 +77,8 @@ export function PhotoDetail({
   const [textReady, setTextReady] = useState(false);
   const [pane, setPane] = useState<"read" | "details">(image.group === "writing" ? "read" : "details");
   const [pending, setPending] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -65,6 +86,12 @@ export function PhotoDetail({
     setPageText("");
     setTextReady(false);
     setPane(image.group === "writing" ? "read" : "details");
+    setPlacing(false);
+    setTextOpen(false);
+    setDraft(null);
+    const home = { scale: 1, x: 0, y: 0 };
+    viewRef.current = home;
+    setView(home);
   }, [image.sourcePath, image.group]);
 
   useEffect(() => {
@@ -107,32 +134,43 @@ export function PhotoDetail({
   const rotation = record?.rotation ?? image.rotation ?? 0;
 
   useEffect(() => {
+    if (!textOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setTextOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [textOpen]);
+
+  useEffect(() => {
+    const home = { scale: 1, x: 0, y: 0 };
+    viewRef.current = home;
+    setView(home);
+  }, [rotation]);
+
+  useEffect(() => {
     const photo = imageRef.current;
     const stage = stageRef.current;
     if (!photo || !stage) return;
     const measure = () => {
       if (!photo.naturalWidth || !photo.naturalHeight) return;
-      const imageRect = photo.getBoundingClientRect();
-      const stageRect = stage.getBoundingClientRect();
+      const frameWidth = photo.clientWidth;
+      const frameHeight = photo.clientHeight;
+      if (!frameWidth || !frameHeight) return;
       const ratio = photo.naturalWidth / photo.naturalHeight;
-      const boxRatio = imageRect.width / Math.max(imageRect.height, 1);
-      let width = imageRect.width;
-      let height = imageRect.height;
+      const boxRatio = frameWidth / frameHeight;
+      let width = frameWidth;
+      let height = frameHeight;
       let offsetX = 0;
       let offsetY = 0;
       if (boxRatio > ratio) {
-        width = imageRect.height * ratio;
-        offsetX = (imageRect.width - width) / 2;
+        width = frameHeight * ratio;
+        offsetX = (frameWidth - width) / 2;
       } else {
-        height = imageRect.width / ratio;
-        offsetY = (imageRect.height - height) / 2;
+        height = frameWidth / ratio;
+        offsetY = (frameHeight - height) / 2;
       }
-      setBox({
-        left: imageRect.left - stageRect.left + offsetX,
-        top: imageRect.top - stageRect.top + offsetY,
-        width,
-        height,
-      });
+      setBox({ left: offsetX, top: offsetY, width, height });
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -190,28 +228,132 @@ export function PhotoDetail({
     if (saved) setCategoryDraft("");
   }
 
+  placingRef.current = placing;
+
+  function showView(next: { scale: number; x: number; y: number }) {
+    viewRef.current = next;
+    setView(next);
+  }
+
+  function fittedView(scale: number, x: number, y: number) {
+    const stage = stageRef.current;
+    const nextScale = Math.min(4, Math.max(1, scale));
+    if (!stage || nextScale <= 1.001) return { scale: 1, x: 0, y: 0 };
+    const width = stage.clientWidth;
+    const height = stage.clientHeight;
+    return {
+      scale: nextScale,
+      x: Math.min(0, Math.max(width - width * nextScale, x)),
+      y: Math.min(0, Math.max(height - height * nextScale, y)),
+    };
+  }
+
   function photoPoint(clientX: number, clientY: number) {
     const stage = stageRef.current;
+    const frame = viewRef.current;
     if (!stage || !box.width || !box.height) return null;
     const stageRect = stage.getBoundingClientRect();
-    const x = (clientX - stageRect.left - box.left) / box.width;
-    const y = (clientY - stageRect.top - box.top) / box.height;
+    const localX = (clientX - stageRect.left - frame.x) / frame.scale;
+    const localY = (clientY - stageRect.top - frame.y) / frame.scale;
+    const x = (localX - box.left) / box.width;
+    const y = (localY - box.top) / box.height;
     if (x < 0 || y < 0 || x > 1 || y > 1) return null;
     return { x, y };
   }
 
-  function onPhotoClick(event: MouseEvent<HTMLImageElement>) {
-    const point = photoPoint(event.clientX, event.clientY);
-    if (!point) return;
+  function beginTag(point: { x: number; y: number }) {
+    const moving = Boolean(draft) && !editingId;
     setEditingId(null);
     setDraft(point);
+    setError(null);
+    setPane("details");
+    if (moving) return;
     setKind("person");
     setName("");
     setRole("");
     setParentList([]);
     setParentDraft("");
-    setError(null);
-    window.setTimeout(() => nameRef.current?.focus(), 0);
+    if (!window.matchMedia("(max-width: 800px)").matches) window.setTimeout(() => nameRef.current?.focus(), 0);
+  }
+
+  function onStagePointerDown(event: PointerEvent<HTMLDivElement>) {
+    if ((event.target as HTMLElement).closest("button")) return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    try {
+      stage.setPointerCapture(event.pointerId);
+    } catch {
+      // A pointer can already be gone. Tracking still works without capture.
+    }
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const fingers = [...pointersRef.current.values()];
+    if (fingers.length >= 2) {
+      const [a, b] = fingers;
+      const rect = stage.getBoundingClientRect();
+      gestureRef.current = {
+        mode: "pinch",
+        start: viewRef.current,
+        originX: event.clientX,
+        originY: event.clientY,
+        startDist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+        startMidX: (a.x + b.x) / 2 - rect.left,
+        startMidY: (a.y + b.y) / 2 - rect.top,
+      };
+      return;
+    }
+    gestureRef.current = {
+      mode: "tap",
+      start: viewRef.current,
+      originX: event.clientX,
+      originY: event.clientY,
+      startDist: 0,
+      startMidX: 0,
+      startMidY: 0,
+    };
+  }
+
+  function onStagePointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (!pointersRef.current.has(event.pointerId)) return;
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const gesture = gestureRef.current;
+    const stage = stageRef.current;
+    if (!gesture || !stage) return;
+    const fingers = [...pointersRef.current.values()];
+    if (gesture.mode === "pinch" && fingers.length >= 2) {
+      const [a, b] = fingers;
+      const rect = stage.getBoundingClientRect();
+      const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      const midX = (a.x + b.x) / 2 - rect.left;
+      const midY = (a.y + b.y) / 2 - rect.top;
+      const scale = Math.min(4, Math.max(1, gesture.start.scale * (dist / gesture.startDist)));
+      const localX = (gesture.startMidX - gesture.start.x) / gesture.start.scale;
+      const localY = (gesture.startMidY - gesture.start.y) / gesture.start.scale;
+      showView(fittedView(scale, midX - localX * scale, midY - localY * scale));
+      return;
+    }
+    const distance = Math.hypot(event.clientX - gesture.originX, event.clientY - gesture.originY);
+    if (gesture.mode === "tap" && distance > 8 && viewRef.current.scale > 1) gesture.mode = "pan";
+    if (gesture.mode === "pan") {
+      showView(
+        fittedView(
+          gesture.start.scale,
+          gesture.start.x + event.clientX - gesture.originX,
+          gesture.start.y + event.clientY - gesture.originY,
+        ),
+      );
+    }
+  }
+
+  function onStagePointerUp(event: PointerEvent<HTMLDivElement>) {
+    const gesture = gestureRef.current;
+    pointersRef.current.delete(event.pointerId);
+    if (pointersRef.current.size === 0) gestureRef.current = null;
+    else if (gesture?.mode === "pinch") gestureRef.current = null;
+    if (!gesture || gesture.mode !== "tap" || pointersRef.current.size > 0) return;
+    const narrow = window.matchMedia("(max-width: 800px)").matches;
+    if (narrow && !placingRef.current) return;
+    const point = photoPoint(gesture.originX, gesture.originY);
+    if (point) beginTag(point);
   }
 
   function onPinPointerDown(event: PointerEvent<HTMLButtonElement>, pin: PhotoPin) {
@@ -293,6 +435,7 @@ export function PhotoDetail({
     setDraft(null);
     setEditingId(null);
     setParentDraft("");
+    setPlacing(false);
   }
 
   async function onTag(event: FormEvent<HTMLFormElement>) {
@@ -337,6 +480,24 @@ export function PhotoDetail({
   }
 
   const types = record?.types ?? [];
+  async function removePhoto() {
+    setRemoving(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/knowledge", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourcePath: image.sourcePath }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "That photo could not be removed.");
+      onRemoved();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "That photo could not be removed.");
+      setRemoving(false);
+    }
+  }
+
   const selectedCategories = record?.categories ?? [];
   const pins = record?.pins ?? [];
   const tagging = Boolean(draft || editingId);
@@ -355,8 +516,47 @@ export function PhotoDetail({
     <div className="lightbox" role="dialog" aria-modal="true" aria-label={image.filename}>
       <button type="button" className="lightbox-backdrop" aria-label="Close photo" onClick={onClose} />
       <div className="lightbox-card">
-        <div className="photo-stage" ref={stageRef}>
-          <img ref={imageRef} src={mediaSrc(image.sourcePath, "full", rotation)} alt={image.filename} onClick={onPhotoClick} />
+        <div
+          className="photo-stage"
+          ref={stageRef}
+          onPointerDown={onStagePointerDown}
+          onPointerMove={onStagePointerMove}
+          onPointerUp={onStagePointerUp}
+          onPointerCancel={(event) => {
+            pointersRef.current.delete(event.pointerId);
+            gestureRef.current = null;
+          }}
+        >
+          <div className="photo-zoom" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
+            <img ref={imageRef} src={mediaSrc(image.sourcePath, "full", rotation)} alt={image.filename} draggable={false} />
+            {box.width > 0 ? (
+              <div className="pin-layer" style={{ left: box.left, top: box.top, width: box.width, height: box.height }}>
+                {pinsHidden
+                  ? null
+                  : pins.map((pin) => {
+                      const placed = drag?.id === pin.id ? drag : pin;
+                      return (
+                        <button
+                          key={pin.id}
+                          type="button"
+                          className={drag?.id === pin.id ? "pin is-dragging" : "pin"}
+                          style={{ left: `${placed.x * 100}%`, top: `${placed.y * 100}%` }}
+                          data-pin-id={pin.id}
+                          aria-label={`${pin.label}. Drag to move.`}
+                          onPointerDown={(event) => onPinPointerDown(event, pin)}
+                          onPointerMove={onPinPointerMove}
+                          onPointerUp={onPinPointerUp}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <i />
+                          <span>{pin.label}</span>
+                        </button>
+                      );
+                    })}
+                {draft ? <span className="pin is-draft" style={{ left: `${draft.x * 100}%`, top: `${draft.y * 100}%` }}><i /></span> : null}
+              </div>
+            ) : null}
+          </div>
           <div className="photo-rotate" role="group" aria-label="Rotate photo">
             <button type="button" aria-label="Rotate left" disabled={pending || !record} onClick={() => void rotate("left")}>
               ↺
@@ -365,46 +565,59 @@ export function PhotoDetail({
               ↻
             </button>
           </div>
+          <div className="photo-actions">
+            {image.group === "writing" ? (
+              <button type="button" className="photo-fulltext" onClick={() => setTextOpen(true)}>
+                Full text
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className={placing || tagging ? "photo-tag is-on" : "photo-tag"}
+              aria-pressed={placing || tagging}
+              onClick={() => {
+                if (placing || tagging) closeEditor();
+                else {
+                  setPlacing(true);
+                  setPane("details");
+                }
+              }}
+            >
+              {placing || tagging ? "Cancel" : "Tag"}
+            </button>
+          </div>
+          {placing && !draft ? <p className="photo-tag-hint">Tap the photo, then pick the person.</p> : null}
           {pins.length > 0 ? (
             <button type="button" className="pin-visibility" onClick={() => setPinsHidden((hidden) => !hidden)}>
               {pinsHidden ? "Show tags" : "Hide tags"}
             </button>
           ) : null}
-          {box.width > 0 ? (
-            <div className="pin-layer" style={{ left: box.left, top: box.top, width: box.width, height: box.height }}>
-              {pinsHidden
-                ? null
-                : pins.map((pin) => {
-                    const placed = drag?.id === pin.id ? drag : pin;
-                    return (
-                      <button
-                        key={pin.id}
-                        type="button"
-                        className={drag?.id === pin.id ? "pin is-dragging" : "pin"}
-                        style={{ left: `${placed.x * 100}%`, top: `${placed.y * 100}%` }}
-                        data-pin-id={pin.id}
-                        aria-label={`${pin.label}. Drag to move.`}
-                        onPointerDown={(event) => onPinPointerDown(event, pin)}
-                        onPointerMove={onPinPointerMove}
-                        onPointerUp={onPinPointerUp}
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <i />
-                        <span>{pin.label}</span>
-                      </button>
-                    );
-                  })}
-              {draft ? <span className="pin is-draft" style={{ left: `${draft.x * 100}%`, top: `${draft.y * 100}%` }}><i /></span> : null}
-            </div>
-          ) : null}
         </div>
         <div className="lightbox-copy">
           <div className="lightbox-heading">
             <h2>{image.filename}</h2>
-            <button type="button" onClick={onClose}>
-              Close
-            </button>
+            <div className="heading-actions">
+              {image.removable && !confirmRemove ? (
+                <button type="button" onClick={() => setConfirmRemove(true)}>
+                  Remove
+                </button>
+              ) : null}
+              <button type="button" onClick={onClose}>
+                Close
+              </button>
+            </div>
           </div>
+          {confirmRemove ? (
+            <div className="knowledge-actions">
+              <button type="button" onClick={() => void removePhoto()} disabled={removing}>
+                {removing ? "Removing" : "Remove this photo"}
+              </button>
+              <button type="button" onClick={() => setConfirmRemove(false)} disabled={removing}>
+                Cancel
+              </button>
+              {error ? <p className="notice">{error}</p> : null}
+            </div>
+          ) : null}
 
           {tagging ? null : (
             <div className="page-switch" role="tablist" aria-label="Photo tools">
@@ -490,7 +703,12 @@ export function PhotoDetail({
           {tagging || pane === "details" ? (
           <section className={tagging ? "tag-groups" : "tag-groups page-card"}>
             <h3>{tagging ? (editingId ? "Edit" : "Tag") + (kind === "person" ? " person" : " thing") : "People and things"}</h3>
-            {tagging ? null : <p className="count">Click the photo to add a tag. Drag a dot to move it.</p>}
+            {tagging ? null : (
+              <>
+                <p className="count photo-tag-desktop">Click the photo to add a tag. Drag a dot to move it.</p>
+                <p className="count photo-tag-mobile">Tap Tag, then the photo, and pick the person.</p>
+              </>
+            )}
             {tagging ? (
               <form className="correction" onSubmit={onTag}>
                 <div className="choice" role="group" aria-label="Tag kind">
@@ -505,6 +723,7 @@ export function PhotoDetail({
                 {kind === "person" ? (
                   <NameSearch
                     mode="field"
+                    browse
                     id="tag-name"
                     inputRef={nameRef}
                     label="Who is this?"
@@ -638,6 +857,28 @@ export function PhotoDetail({
           {error ? <p className="notice">{error}</p> : null}
         </div>
       </div>
+      {textOpen ? (
+        <div className="text-modal" role="dialog" aria-modal="true" aria-label={`Full text of ${image.filename}`}>
+          <button type="button" className="lightbox-backdrop" aria-label="Close full text" onClick={() => setTextOpen(false)} />
+          <div className="text-modal-card">
+            <div className="lightbox-heading">
+              <h2>Full text</h2>
+              <button type="button" onClick={() => setTextOpen(false)}>
+                Close
+              </button>
+            </div>
+            <div className="text-modal-body page-print">
+              {!textReady ? <p className="count">Reading the page…</p> : null}
+              {textReady && paragraphs.length === 0 ? <p className="page-empty">No writing was found on this page.</p> : null}
+              {paragraphs.map((paragraph, index) => (
+                <p key={index}>
+                  <Marked text={paragraph} people={people} />
+                </p>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { summarize, type CatalogFile } from "@/lib/catalog";
 import { loadCatalog } from "@/lib/load-catalog";
+import { previewPathname } from "@/lib/image-preview";
 import { forgetPhoto } from "@/lib/photo-record";
 import { getPrisma, upstashVectorCredentials } from "@/lib/prisma";
 
@@ -32,6 +33,10 @@ export async function removeKnowledgeDocument(sourcePath: string): Promise<void>
   if (sourcePath.startsWith("uploads/")) await removeUploadFile(sourcePath);
   await removeVector(sourcePath);
   if (asset.blobPathname) await removeBlob(asset.blobPathname);
+  if (asset.kind === "IMAGE") {
+    await removeBlob(previewPathname(asset.sha256, 480));
+    await removeBlob(previewPathname(asset.sha256, 1600));
+  }
 }
 
 async function removeFromDatabase(sourcePath: string): Promise<boolean> {

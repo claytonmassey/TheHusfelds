@@ -38,12 +38,20 @@ type SessionBody = {
 };
 
 export async function currentAccount(): Promise<AccountView | null> {
+  const account = await currentAccountRecord();
+  return account ? present(account) : null;
+}
+
+export async function currentAccountId(): Promise<string | null> {
+  const account = await currentAccountRecord();
+  return account ? account.id : null;
+}
+
+async function currentAccountRecord(): Promise<Account | null> {
   const token = (await cookies()).get(COOKIE)?.value;
   const id = token ? await accountIdFrom(token) : null;
   if (!id) return null;
-  const account = (await readAccounts()).find((item) => item.id === id);
-  if (!account) return null;
-  return present(account);
+  return (await readAccounts()).find((item) => item.id === id) ?? null;
 }
 
 export async function signUp(input: { firstName: string; lastName: string; email: string; password: string }): Promise<AccountView> {

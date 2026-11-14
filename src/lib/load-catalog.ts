@@ -133,6 +133,7 @@ async function readDatabaseCatalog(): Promise<CatalogFile | null> {
       sourceModified: asset.sourceModified.toISOString(),
       blobUrl: asset.blobUrl,
       blobPathname: asset.blobPathname,
+      uploadedBy: asset.uploadedBy,
       status: asset.status,
       error: asset.error,
     })),

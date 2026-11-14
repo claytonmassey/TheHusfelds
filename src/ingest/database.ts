@@ -68,6 +68,7 @@ function assetWrite(captureId: string, asset: CatalogAsset) {
     sourceModified: new Date(asset.sourceModified),
     blobUrl: asset.blobUrl,
     blobPathname: asset.blobPathname,
+    uploadedBy: asset.uploadedBy ?? null,
     status: asset.status,
     error: asset.error,
   };

@@ -13,6 +13,7 @@ export function NameSearch({
   value,
   options,
   exclude = [],
+  browse = false,
   onChange,
   onSelect,
 }: {
@@ -23,14 +24,21 @@ export function NameSearch({
   value: string;
   options: KnownName[];
   exclude?: string[];
+  browse?: boolean;
   onChange: (value: string) => void;
   onSelect?: (name: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(browse);
   const needle = value.trim().toLowerCase();
+  const pool = options.filter((item) => !exclude.some((name) => sameName(name, item.name)));
+  const ordered = browse && !needle
+    ? [...pool.filter((item) => item.where === "family"), ...pool.filter((item) => item.where !== "family")]
+    : pool;
   const matches = needle
-    ? options.filter((item) => item.name.toLowerCase().includes(needle) && !exclude.some((name) => sameName(name, item.name))).slice(0, 8)
-    : [];
+    ? ordered.filter((item) => item.name.toLowerCase().includes(needle)).slice(0, 8)
+    : browse
+      ? ordered.slice(0, 24)
+      : [];
 
   function resolved(raw: string): string {
     const clean = raw.replace(/\s+/g, " ").trim();
@@ -57,7 +65,7 @@ export function NameSearch({
           value={value}
           placeholder={label}
           aria-label={label}
-          aria-expanded={open && needle.length > 0}
+          aria-expanded={open && matches.length > 0}
           aria-autocomplete="list"
           maxLength={80}
           onFocus={() => setOpen(true)}
@@ -98,14 +106,14 @@ export function NameSearch({
           </button>
         ) : null}
       </div>
-      {open && needle ? (
+      {open && (needle || (browse && matches.length > 0)) ? (
         <ul role="listbox">
           {matches.map((item) => (
             <li key={`${item.where}-${item.name}`}>
               <button
                 type="button"
                 role="option"
-                onMouseDown={(event) => {
+                onPointerDown={(event) => {
                   event.preventDefault();
                   pick(item.name);
                 }}
@@ -115,7 +123,7 @@ export function NameSearch({
               </button>
             </li>
           ))}
-          {matches.length === 0 ? <li className="name-search-empty">No one matches. This name can still be used.</li> : null}
+          {needle && matches.length === 0 ? <li className="name-search-empty">No one matches. This name can still be used.</li> : null}
         </ul>
       ) : null}
     </div>

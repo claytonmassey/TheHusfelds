@@ -85,13 +85,13 @@ export function KnowledgeRepo({ items }: { items: KnowledgeItem[] }) {
                       Cancel
                     </button>
                   </div>
-                ) : (
+                ) : item.removable ? (
                   <div className="knowledge-actions">
                     <button type="button" onClick={() => setConfirming(item.sourcePath)}>
                       Delete
                     </button>
                   </div>
-                )}
+                ) : null}
               </div>
             </li>
           ))}

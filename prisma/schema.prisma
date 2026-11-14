@@ -53,6 +53,7 @@ model Asset {
   sourceModified DateTime
   blobUrl        String?
   blobPathname   String?
+  uploadedBy     String?
   status         IngestStatus @default(CATALOGED)
   error          String?
   createdAt      DateTime     @default(now())

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type ChangeEvent } from "react";
 
 import { PhotoDetail } from "@/components/photo-detail";
 import type { GalleryImage } from "@/lib/library-view";
@@ -73,14 +73,13 @@ export function Gallery({ images }: { images: GalleryImage[] }) {
   );
   const visible = searched.filter((image) => inType(image) && inFamily(image));
 
-  async function onUpload(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (files.length === 0 || uploading) return;
+  async function uploadList(chosen: File[]) {
+    if (chosen.length === 0 || uploading) return;
     setUploading(true);
     setUploadNote("");
     let added = 0;
     let note = "";
-    for (const file of files) {
+    for (const file of chosen) {
       setUploadStatus(`Adding ${file.name}…`);
       const body = new FormData();
       body.set("file", file);
@@ -98,29 +97,35 @@ export function Gallery({ images }: { images: GalleryImage[] }) {
     }
     setUploading(false);
     setUploadStatus("");
-    setFiles([]);
-    if (fileRef.current) fileRef.current.value = "";
+    if (added > 0) {
+      setFiles([]);
+      if (fileRef.current) fileRef.current.value = "";
+      router.refresh();
+    }
     setUploadNote(added > 0 && !note.startsWith("Added") ? note : added === 1 ? note : added > 1 ? `Added ${added} photos.` : note);
-    if (added > 0) router.refresh();
+  }
+
+  function onPick(event: ChangeEvent<HTMLInputElement>) {
+    const chosen = [...(event.target.files ?? [])];
+    setFiles(chosen);
+    setUploadNote("");
+    if (chosen.length > 0) void uploadList(chosen);
   }
 
   return (
     <section>
-      <form className="upload-form gallery-upload" onSubmit={onUpload}>
+      <form className="upload-form gallery-upload" onSubmit={(event) => event.preventDefault()}>
         <label className="file-picker">
           <input
             ref={fileRef}
             type="file"
             multiple
             accept=".jpg,.jpeg,.png,.gif,.webp,.heic,.heif,.tif,.tiff,image/*"
-            onChange={(event) => {
-              setFiles([...(event.target.files ?? [])]);
-              setUploadNote("");
-            }}
+            onChange={onPick}
           />
           <span>{files.length > 0 ? `${files.length} photo${files.length === 1 ? "" : "s"} selected` : "Choose photos"}</span>
         </label>
-        <button type="submit" disabled={uploading || files.length === 0}>
+        <button type="button" disabled={uploading} onClick={() => fileRef.current?.click()}>
           {uploading ? "Adding" : "Add to the gallery"}
         </button>
       </form>
@@ -179,6 +184,10 @@ export function Gallery({ images }: { images: GalleryImage[] }) {
           image={{ ...selected, rotation: turns[selected.sourcePath] ?? selected.rotation }}
           note={notes[selected.sourcePath] ?? ""}
           onClose={() => setSelected(null)}
+          onRemoved={() => {
+            setSelected(null);
+            router.refresh();
+          }}
           onSaved={(note) => setNotes((current) => ({ ...current, [selected.sourcePath]: note }))}
           onTurned={(rotation) => setTurns((current) => ({ ...current, [selected.sourcePath]: rotation }))}
           onTagged={(update) => {

@@ -1135,8 +1135,10 @@ h1 {
 }
 
 .name-search ul {
+  max-height: 11rem;
   margin: 0;
   padding: 0.25rem;
+  overflow: auto;
   list-style: none;
   background: white;
   border: 1px solid var(--line);
@@ -1594,10 +1596,10 @@ h1 {
 .lightbox {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 80;
   display: grid;
-  place-items: center;
-  padding: 1rem;
+  place-items: start center;
+  padding: 4.75rem 1rem 1rem;
 }
 
 .lightbox-backdrop {
@@ -1613,7 +1615,7 @@ h1 {
   display: grid;
   grid-template-columns: minmax(16rem, 1.15fr) minmax(20rem, 0.85fr);
   width: min(1080px, 100%);
-  height: min(840px, calc(100dvh - 3rem));
+  height: min(840px, calc(100dvh - 5.75rem));
   overflow: hidden;
   background: var(--paper);
   border-radius: 22px;
@@ -1629,6 +1631,14 @@ h1 {
   height: 100%;
   overflow: hidden;
   background: #ebe4d8;
+  touch-action: none;
+  user-select: none;
+}
+
+.photo-zoom {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
 }
 
 .photo-stage img {
@@ -1637,6 +1647,33 @@ h1 {
   object-fit: contain;
   display: block;
   cursor: crosshair;
+}
+
+.photo-actions {
+  position: absolute;
+  right: 0.65rem;
+  bottom: 0.65rem;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.4rem;
+}
+
+.photo-fulltext {
+  padding: 0.5rem 0.95rem;
+  color: var(--ink);
+  background: rgba(246, 241, 232, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.photo-tag,
+.photo-tag-hint,
+.photo-tag-mobile {
+  display: none;
 }
 
 .pin-layer {
@@ -2290,7 +2327,9 @@ h1 {
 }
 
 .lightbox-heading h2 {
+  min-width: 0;
   margin: 0;
+  overflow-wrap: anywhere;
   font-family: var(--font-display), Georgia, serif;
   font-size: 1.6rem;
   font-weight: 520;
@@ -2306,6 +2345,37 @@ h1 {
   background: transparent;
   border-radius: 999px;
   cursor: pointer;
+}
+
+.text-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 4.75rem 1rem 1rem;
+}
+
+.text-modal-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(40rem, 100%);
+  max-height: min(40rem, calc(100dvh - 6rem));
+  overflow: hidden;
+  background: var(--paper);
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+}
+
+.text-modal-card .lightbox-heading {
+  padding: max(1rem, env(safe-area-inset-top)) 1rem 0.2rem;
+}
+
+.text-modal-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 0.6rem 1.15rem max(1.2rem, env(safe-area-inset-bottom));
 }
 
 .heading-actions {
@@ -3572,18 +3642,88 @@ span.about-portrait {
     grid-template-columns: 1fr;
   }
 
+  .lightbox:has(.lightbox-card) {
+    padding: 0;
+    place-items: stretch;
+  }
+
   .lightbox-card {
-    height: auto;
-    max-height: calc(100dvh - 2rem);
-    overflow: auto;
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    overflow: hidden;
   }
 
   .photo-stage {
-    height: 36vh;
+    height: 100%;
+    min-height: 0;
   }
 
   .lightbox-copy {
-    overflow: visible;
+    min-height: 0;
+    overflow: auto;
+    padding-bottom: max(1.2rem, env(safe-area-inset-bottom));
+  }
+
+  .text-modal {
+    padding: 0;
+  }
+
+  .text-modal-card {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+  }
+
+  .photo-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.5rem 0.95rem;
+    color: var(--paper);
+    background: var(--ink);
+    border: 0;
+    border-radius: 999px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+
+  .photo-tag.is-on {
+    color: var(--ink);
+    background: rgba(246, 241, 232, 0.94);
+    border: 1px solid var(--line);
+  }
+
+  .photo-tag-hint {
+    position: absolute;
+    top: 0.7rem;
+    left: 50%;
+    z-index: 3;
+    display: block;
+    max-width: calc(100% - 7rem);
+    margin: 0;
+    padding: 0.35rem 0.7rem;
+    color: var(--ink);
+    font-size: 0.85rem;
+    text-align: center;
+    background: rgba(246, 241, 232, 0.94);
+    border-radius: 999px;
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+
+  .photo-tag-desktop {
+    display: none;
+  }
+
+  .photo-tag-mobile {
+    display: block;
+  }
+
+  .name-search ul button {
+    min-height: 2.75rem;
   }
 
   .pin-kin {
