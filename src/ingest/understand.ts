@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import sharp from "sharp";
+
 import type { CatalogAsset } from "../lib/catalog";
 import { publishTranscript } from "../lib/publish-transcript";
 import { upstashVectorCredentials } from "../lib/prisma";
@@ -143,19 +145,19 @@ function embeddingText(asset: CatalogAsset, capture: string, description: string
 async function describeFile(sourceDir: string, asset: CatalogAsset, apiKey: string): Promise<string> {
   const directory = await mkdtemp(path.join(tmpdir(), "husfelds-"));
   try {
-    const jpeg = await previewJpeg(sourceDir, asset, directory);
+    const jpeg = await previewJpeg(sourceDir, asset, directory, 4096);
     const bytes = await readFile(jpeg);
-    return await askVision(bytes.toString("base64"), asset, apiKey);
+    return await askVision(bytes, asset, apiKey, async () => readFile(await previewJpeg(sourceDir, asset, directory, 8192)));
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 }
 
-async function previewJpeg(sourceDir: string, asset: CatalogAsset, directory: string): Promise<string> {
+async function previewJpeg(sourceDir: string, asset: CatalogAsset, directory: string, maxEdge: number): Promise<string> {
   const source = path.join(sourceDir, ...asset.sourcePath.split("/"));
-  const jpeg = path.join(directory, "preview.jpg");
+  const jpeg = path.join(directory, `preview-${maxEdge}.jpg`);
   if (asset.kind === "IMAGE" || asset.extension === "pdf") {
-    await execFileAsync("sips", ["-s", "format", "jpeg", "-Z", "2048", source, "--out", jpeg]);
+    await execFileAsync("sips", ["-s", "format", "jpeg", "-Z", String(maxEdge), source, "--out", jpeg]);
     return jpeg;
   }
 
@@ -165,15 +167,61 @@ async function previewJpeg(sourceDir: string, asset: CatalogAsset, directory: st
   return jpeg;
 }
 
-async function askVision(base64: string, asset: CatalogAsset, apiKey: string): Promise<string> {
-  const prompt =
-    "Transcribe every piece of visible text in this image. Copy names, dates, places, and numbers as written, and keep the line breaks. Do not summarize. If a word is unclear, write [unclear]. If the image has no text, say \"No text\" and describe the scene in one sentence.";
+const TRANSCRIBE_PROMPT = [
+  "Transcribe the document in this photo.",
+  "Write every line you can read, in reading order. If two pages are open, finish the left page from top to bottom, then the right page.",
+  "Do not summarize. Do not skip a line. Do not replace a passage with ellipses or [...].",
+  "If one word cannot be read, write [unclear] and continue. Keep names, dates, and the original spelling.",
+  "Skip website pages, browser text, and other sheets that are only underneath the document.",
+  "Do not add a note about the transcription.",
+  "Handwriting counts as text even when it is hard to read. If the photo shows no writing at all, say \"No text\" and describe the scene in one sentence.",
+].join(" ");
 
+const BAND_PROMPT = [
+  "This is one strip of a photographed page.",
+  "Transcribe every handwritten line in this strip, from top to bottom.",
+  "Do not summarize. Do not skip a line. Do not use ellipses or [...].",
+  "If one word cannot be read, write [unclear] and continue. Keep the original spelling.",
+  "Ignore printed website pages, census forms, and other sheets that are only underneath the handwriting.",
+  "If this strip has no handwriting, reply with exactly: empty",
+  "Do not add a note.",
+].join(" ");
+
+async function askVision(
+  preview: Buffer,
+  asset: CatalogAsset,
+  apiKey: string,
+  larger: () => Promise<Buffer>,
+): Promise<string> {
+  const text = await readImageText(preview.toString("base64"), apiKey, "gpt-4o-mini", TRANSCRIBE_PROMPT);
+  if (!text) throw new Error(`GPT returned no description for ${asset.filename}.`);
+  if (!needsCloserRead(text)) return cleanTranscript(text);
+
+  const tiles = await tileImage(await larger());
+  const parts: string[] = [];
+  for (const tile of tiles) {
+    let piece = "";
+    try {
+      piece = await readImageText(tile.toString("base64"), apiKey, "gpt-4o", BAND_PROMPT);
+    } catch {
+      piece = "";
+    }
+    const cleaned = cleanTranscript(piece);
+    if (!readablePassage(cleaned)) continue;
+    parts.push(cleaned);
+  }
+  const joined = joinBands(parts);
+  const first = cleanTranscript(text);
+  if (readablePassage(joined) && joined.length > first.length) return joined;
+  return first;
+}
+
+async function readImageText(base64: string, apiKey: string, model: string, prompt: string): Promise<string> {
   const response = await openai(
     "https://api.openai.com/v1/chat/completions",
     {
-      model: "gpt-4o-mini",
-      max_tokens: 2000,
+      model,
+      max_tokens: 5000,
       messages: [
         {
           role: "user",
@@ -187,14 +235,107 @@ async function askVision(base64: string, asset: CatalogAsset, apiKey: string): P
     apiKey,
   );
   const text = response.choices?.[0]?.message?.content;
-  if (typeof text !== "string" || text.trim().length === 0) {
-    throw new Error(`GPT returned no description for ${asset.filename}.`);
+  return typeof text === "string" ? text.trim() : "";
+}
+
+function needsCloserRead(text: string): boolean {
+  return omittedPassage(text) || isRefusal(text);
+}
+
+function readablePassage(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (/^(empty|no text|i'm sorry|i am sorry)\b/i.test(trimmed)) return false;
+  if (isRefusal(trimmed)) return false;
+  return true;
+}
+
+function omittedPassage(text: string): boolean {
+  return /\[\.\.\.\]|\.{3,}/.test(text);
+}
+
+function joinBands(parts: string[]): string {
+  const lines: string[] = [];
+  for (const part of parts) {
+    const next = part.split("\n");
+    let cut = 0;
+    const max = Math.min(4, lines.length, next.length);
+    for (let count = max; count >= 1; count -= 1) {
+      const tail = lines.slice(-count).map((line) => line.trim()).join("\n");
+      const head = next.slice(0, count).map((line) => line.trim()).join("\n");
+      if (tail && tail === head) {
+        cut = count;
+        break;
+      }
+    }
+    lines.push(...next.slice(cut));
   }
-  return text.trim();
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function cleanTranscript(text: string): string {
+  return text.replace(/\n+\(Note:[\s\S]*$/i, "").trim();
+}
+
+async function tileImage(jpeg: Buffer): Promise<Buffer[]> {
+  const meta = await sharp(jpeg).metadata();
+  const width = meta.width ?? 0;
+  const height = meta.height ?? 0;
+  if (width < 900 || height < 900) return [];
+  const wide = width > height * 1.15;
+  const tall = height > width * 1.15;
+  const columns = tall && !wide ? 1 : 2;
+  const rows = tall || !wide ? 2 : 1;
+  const overlapX = Math.round((width / columns) * 0.06);
+  const overlapY = Math.round((height / rows) * 0.04);
+  const tileW = Math.ceil(width / columns);
+  const tileH = Math.ceil(height / rows);
+  const tiles: Buffer[] = [];
+  for (let column = 0; column < columns; column += 1) {
+    for (let row = 0; row < rows; row += 1) {
+      const left = Math.max(0, column * tileW - (column > 0 ? overlapX : 0));
+      const top = Math.max(0, row * tileH - (row > 0 ? overlapY : 0));
+      const right = Math.min(width, (column + 1) * tileW + (column < columns - 1 ? overlapX : 0));
+      const bottom = Math.min(height, (row + 1) * tileH + (row < rows - 1 ? overlapY : 0));
+      tiles.push(
+        await sharp(jpeg)
+          .extract({ left, top, width: right - left, height: bottom - top })
+          .jpeg({ quality: 90 })
+          .toBuffer(),
+      );
+    }
+  }
+  return tiles;
+}
+
+export async function refreshTranscript(filename: string): Promise<{ filename: string; characters: number }> {
+  const sourceDir = path.resolve(process.env.SOURCE_DIR ?? "Source");
+  const captures = await loadCaptures(path.join("data", "catalog.json"));
+  const item = captures
+    .flatMap((capture) => capture.assets.map((asset) => ({ asset, capture: capture.basename })))
+    .find((entry) => entry.asset.filename === filename);
+  if (!item) throw new Error(`Could not find ${filename}.`);
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not set.");
+  const description = await describeFile(sourceDir, item.asset, apiKey);
+  if (isRefusal(description) || /^no text\b/i.test(description)) {
+    throw new Error(`No transcription for ${filename}.`);
+  }
+  const memory = await readCheckpoint();
+  const previous = memory[item.asset.sourcePath]?.description ?? "";
+  if (previous.length > description.length && !/^no text\b/i.test(previous)) {
+    return { filename, characters: previous.length };
+  }
+  memory[item.asset.sourcePath] = { description, upserted: false };
+  await writeCheckpoint(memory);
+  await publishTranscript(item.asset, item.capture, description);
+  return { filename, characters: description.length };
 }
 
 function isRefusal(text: string): boolean {
-  return /unable to|cannot (provide|assist|transcribe)|can't assist|i'm sorry/i.test(text);
+  const opening = text.trim().slice(0, 180);
+  if (text.trim().length > 700) return false;
+  return /^(i'm sorry|i am sorry|unable to|i cannot|i can't)/i.test(opening);
 }
 
 async function embed(input: string[], apiKey: string): Promise<number[][]> {
