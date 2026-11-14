@@ -6,6 +6,7 @@ import { NameSearch } from "@/components/name-search";
 import { mergeKnownNames, type KnownName } from "@/lib/known-name";
 import type { GalleryImage } from "@/lib/library-view";
 import { leadSearchTerm, mapHref, pageLeads, type PageLead } from "@/lib/page-leads";
+import { foreignLanguage } from "@/lib/page-language";
 import { marksIn, pageParagraphs, pageSummary, peopleInOrder } from "@/lib/page-text";
 import { ITEM_TYPES, joinNames, sameName, turnPoint, turnRotation, type ItemTypeId, type Person, type PhotoPin, type PhotoRecord } from "@/lib/photo-types";
 
@@ -502,6 +503,7 @@ export function PhotoDetail({
   const pins = record?.pins ?? [];
   const tagging = Boolean(draft || editingId);
   const paragraphs = useMemo(() => pageParagraphs(pageText), [pageText]);
+  const pageTranslation = usePageTranslation(paragraphs.join("\n\n"));
   const summary = useMemo(() => pageSummary(paragraphs), [paragraphs]);
   const mentioned = useMemo(
     () =>
@@ -863,14 +865,19 @@ export function PhotoDetail({
           <div className="text-modal-card">
             <div className="lightbox-heading">
               <h2>Full text</h2>
-              <button type="button" onClick={() => setTextOpen(false)}>
-                Close
-              </button>
+              <div className="heading-actions">
+                <LanguageSwitch translation={pageTranslation} />
+                <button type="button" onClick={() => setTextOpen(false)}>
+                  Close
+                </button>
+              </div>
             </div>
             <div className="text-modal-body page-print">
               {!textReady ? <p className="count">Reading the page…</p> : null}
               {textReady && paragraphs.length === 0 ? <p className="page-empty">No writing was found on this page.</p> : null}
-              {paragraphs.map((paragraph, index) => (
+              {pageTranslation.showEnglish ? <p className="count">Translated from {pageTranslation.language}.</p> : null}
+              {pageTranslation.error ? <p className="notice">{pageTranslation.error}</p> : null}
+              {(pageTranslation.showEnglish && pageTranslation.english ? pageTranslation.english : paragraphs).map((paragraph, index) => (
                 <p key={index}>
                   <Marked text={paragraph} people={people} />
                 </p>
@@ -894,6 +901,96 @@ type PageHit = {
   filename: string;
   excerpt: string;
 };
+
+type PageTranslation = {
+  language: string | null;
+  english: string[] | null;
+  showEnglish: boolean;
+  translating: boolean;
+  error: string | null;
+  showOriginal: () => void;
+  showTranslation: () => void;
+};
+
+function usePageTranslation(text: string): PageTranslation {
+  const detected = useMemo(() => foreignLanguage(text), [text]);
+  const [language, setLanguage] = useState<string | null>(detected);
+  const [english, setEnglish] = useState<string[] | null>(null);
+  const [showEnglish, setShowEnglish] = useState(false);
+  const [translating, setTranslating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLanguage(detected);
+    setEnglish(null);
+    setShowEnglish(false);
+    setTranslating(false);
+    setError(null);
+  }, [text, detected]);
+
+  function showOriginal() {
+    setShowEnglish(false);
+  }
+
+  async function loadEnglish() {
+    if (english) {
+      setShowEnglish(true);
+      return;
+    }
+    setTranslating(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const payload = (await response.json()) as { language?: string; english?: string; error?: string };
+      if (!response.ok || !payload.english) throw new Error(payload.error || "The translation did not come back.");
+      const name = payload.language?.trim() || "another language";
+      if (name.toLowerCase() === "english") {
+        setLanguage(null);
+        setShowEnglish(false);
+        return;
+      }
+      const parts = payload.english
+        .split(/\n+/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+      setLanguage(name);
+      setEnglish(parts.length > 0 ? parts : [payload.english.trim()]);
+      setShowEnglish(true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The translation did not come back.");
+    } finally {
+      setTranslating(false);
+    }
+  }
+
+  return {
+    language,
+    english,
+    showEnglish,
+    translating,
+    error,
+    showOriginal,
+    showTranslation: () => void loadEnglish(),
+  };
+}
+
+function LanguageSwitch({ translation }: { translation: PageTranslation }) {
+  if (!translation.language) return null;
+  return (
+    <div className="page-lang" role="group" aria-label="Language">
+      <button type="button" className="page-edit" aria-pressed={!translation.showEnglish} onClick={translation.showOriginal}>
+        Original
+      </button>
+      <button type="button" className="page-edit" aria-pressed={translation.showEnglish} disabled={translation.translating} onClick={translation.showTranslation}>
+        {translation.translating ? "Translating" : "English"}
+      </button>
+    </div>
+  );
+}
 
 function PageReading({
   ready,
@@ -919,10 +1016,7 @@ function PageReading({
   const [citesOpen, setCitesOpen] = useState(false);
   const [openLead, setOpenLead] = useState<string | null>(null);
   const [hits, setHits] = useState<PageHit[] | null>(null);
-  const [english, setEnglish] = useState<{ language: string; paragraphs: string[] } | null>(null);
-  const [showEnglish, setShowEnglish] = useState(false);
-  const [translating, setTranslating] = useState(false);
-  const [translateError, setTranslateError] = useState<string | null>(null);
+  const pageTranslation = usePageTranslation(paragraphs.join("\n\n"));
 
   useEffect(() => {
     let cancel = false;
@@ -931,9 +1025,6 @@ function PageReading({
     setCitesOpen(false);
     setOpenLead(null);
     setEditError(null);
-    setEnglish(null);
-    setShowEnglish(false);
-    setTranslateError(null);
     fetch(`/api/page-notes?path=${encodeURIComponent(sourcePath)}`, { cache: "no-store" })
       .then((response) => response.json() as Promise<{ edits?: PageEdit[] }>)
       .then((payload) => {
@@ -967,35 +1058,6 @@ function PageReading({
   if (!summary && edits.length === 0) return <p className="page-empty">No writing was found on this photo.</p>;
   const shown = edits[edits.length - 1]?.text || summary;
   const showPrint = paragraphs.length > 1 || paragraphs.join(" ").length > shown.length + 24;
-
-  async function translate() {
-    if (english) {
-      if (english.language.toLowerCase() !== "english") setShowEnglish(true);
-      return;
-    }
-    setTranslating(true);
-    setTranslateError(null);
-    try {
-      const response = await fetch("/api/translate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: paragraphs.join("\n\n") }),
-      });
-      const payload = (await response.json()) as { language?: string; english?: string; error?: string };
-      if (!response.ok || !payload.english) throw new Error(payload.error || "The translation did not come back.");
-      const language = payload.language?.trim() || "another language";
-      const parts = payload.english
-        .split(/\n+/)
-        .map((part) => part.trim())
-        .filter(Boolean);
-      setEnglish({ language, paragraphs: parts.length > 0 ? parts : [payload.english.trim()] });
-      setShowEnglish(language.toLowerCase() !== "english");
-    } catch (caught) {
-      setTranslateError(caught instanceof Error ? caught.message : "The translation did not come back.");
-    } finally {
-      setTranslating(false);
-    }
-  }
 
   async function saveDetail() {
     setSaving(true);
@@ -1120,26 +1182,12 @@ function PageReading({
         <section className="page-card page-sheet">
           <div className="page-card-head">
             <h3>Full text</h3>
-            {english && english.language.toLowerCase() !== "english" ? (
-              <div className="page-lang" role="group" aria-label="Language">
-                <button type="button" className="page-edit" aria-pressed={!showEnglish} onClick={() => setShowEnglish(false)}>
-                  Original
-                </button>
-                <button type="button" className="page-edit" aria-pressed={showEnglish} onClick={() => setShowEnglish(true)}>
-                  English
-                </button>
-              </div>
-            ) : (
-              <button type="button" className="page-edit" onClick={() => void translate()} disabled={translating}>
-                {translating ? "Translating" : "Translate"}
-              </button>
-            )}
+            <LanguageSwitch translation={pageTranslation} />
           </div>
-          {showEnglish && english ? <p className="count">Translated from {english.language}.</p> : null}
-          {translateError ? <p className="notice">{translateError}</p> : null}
-          {english && english.language.toLowerCase() === "english" && !translateError ? <p className="count">This page is already in English.</p> : null}
+          {pageTranslation.showEnglish ? <p className="count">Translated from {pageTranslation.language}.</p> : null}
+          {pageTranslation.error ? <p className="notice">{pageTranslation.error}</p> : null}
           <div className="page-print">
-            {(showEnglish && english ? english.paragraphs : paragraphs).map((paragraph, index) => (
+            {(pageTranslation.showEnglish && pageTranslation.english ? pageTranslation.english : paragraphs).map((paragraph, index) => (
               <p key={index}>
                 <Marked text={paragraph} people={people} />
               </p>
