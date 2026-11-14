@@ -519,7 +519,7 @@ export function FamilyTree({ people: initialPeople, photos, viewerId = null, nam
     }
     let lastX = event.clientX;
     let lastY = event.clientY;
-    const move = (moveEvent: PointerEvent) => {
+    const move = (moveEvent: globalThis.PointerEvent) => {
       if (!moved && Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) < 4) return;
       if (!moved) {
         moved = true;
