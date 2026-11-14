@@ -41,13 +41,9 @@ export async function ingestUploadedDocument(file: File): Promise<UploadedDocume
 
     const sha256 = await sha256File(tempPath);
     const sourcePath = `uploads/${sha256}.${extension}`;
-    const absolute = path.join(sourceDir, "uploads", `${sha256}.${extension}`);
-    await mkdir(path.dirname(absolute), { recursive: true });
-    try {
-      await stat(absolute);
-    } catch {
-      await copyFile(tempPath, absolute);
-    }
+    const localCopy = await keepLocalCopy(sourceDir, sourcePath, tempPath);
+    const absolute = localCopy ?? tempPath;
+    if (!token && !localCopy) throw new Error("The photo could not be saved.");
 
     const existing = await findAssetBySha(sha256).catch(() => null);
     const capture = existing?.capture.basename ?? `upload-${safeStem(original)}-${sha256.slice(0, 8)}`;
@@ -74,6 +70,7 @@ export async function ingestUploadedDocument(file: File): Promise<UploadedDocume
         asset.error = null;
       } catch {
         asset.status = "FAILED";
+        if (!localCopy) throw new Error("The photo could not be copied to storage.");
         warning = "Saved on this Mac. The photo file could not be copied to storage.";
       }
     }
@@ -125,6 +122,22 @@ function quietDatabaseMessage(error: unknown): string {
     return "Saved on this Mac. The catalog will update when the database is reachable.";
   }
   return "Saved on this Mac. The catalog could not be updated.";
+}
+
+async function keepLocalCopy(sourceDir: string, sourcePath: string, tempPath: string): Promise<string | null> {
+  const absolute = path.join(sourceDir, ...sourcePath.split("/"));
+  try {
+    await mkdir(path.dirname(absolute), { recursive: true });
+    try {
+      await stat(absolute);
+    } catch {
+      await copyFile(tempPath, absolute);
+    }
+    return absolute;
+  } catch {
+    // The live server cannot create the local photo folder. The temporary file is stored instead.
+    return null;
+  }
 }
 
 function safeStem(filename: string): string {

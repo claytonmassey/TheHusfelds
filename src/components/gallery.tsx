@@ -86,8 +86,10 @@ export function Gallery({ images }: { images: GalleryImage[] }) {
       body.set("file", file);
       try {
         const response = await fetch("/api/upload", { method: "POST", body });
-        const payload = (await response.json()) as { error?: string; warning?: string; filename?: string };
-        if (!response.ok) throw new Error(payload.error || "The upload failed.");
+        const payload = (await response.json().catch(() => ({}))) as { error?: string; warning?: string; filename?: string };
+        if (!response.ok) {
+          throw new Error(payload.error || (response.status === 413 ? "That photo is too large to add here." : "The upload failed."));
+        }
         added += 1;
         note = payload.warning || `Added ${payload.filename ?? file.name}.`;
       } catch (caught) {
